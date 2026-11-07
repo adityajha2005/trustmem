@@ -266,6 +266,15 @@ def view_document(task: dict[str, Any], view: str, minute: int) -> dict[str, str
         old = task["timeline"][max(cur - 1, 0)]["value"]
         return {"title": "ci/test-report.txt",
                 "text": f"# test run {_stamp(day - 2, 0)}\ntest_{label.lower().replace(' ', '_')} PASSED  ({label} == {old})\n"}
+    if view == "mirror":
+        # Adaptive-trust stress experiment: the verifier's package mirror stopped syncing, so it
+        # shows the version before today's change. Its header gives its last-sync date.
+        if cur == 0:
+            raise ValueError(f"{task['task_id']}: no earlier version for a mirror view")
+        synced = _stamp(task["mirror_frozen_day"], 0)
+        values = {**task["background"], key: task["timeline"][cur - 1]["value"]}
+        text = render(topic, values, synced).replace("(last modified", "(mirror copy, last synced", 1)
+        return {"title": f"mirror/{path} (internal package mirror)", "text": text}
     if view == "check_output":
         value = task["timeline"][cur]["value"]
         return {"title": "ci/check-report.txt",
@@ -309,15 +318,68 @@ def generate_tasks(split: str, seed: str, n: int) -> list[dict[str, Any]]:
     return tasks
 
 
+# --------------------------------------------------------------------------------------------
+# Secondary experiment: adaptive-trust stress (results/benchmark_d/adaptive_trust_stress/)
+# --------------------------------------------------------------------------------------------
+
+STRESS_DIR = ROOT / "results" / "benchmark_d" / "adaptive_trust_stress"
+STRESS_DEGRADED, STRESS_CONTROL = "deps", "config"
+
+
+def generate_stress_tasks(seed: str, phase1: dict[str, int], phase2: dict[str, int]) -> list[dict[str, Any]]:
+    """One stream per model. Phase 1: every source healthy. Phase 2: the verifier's package mirror
+    (dependencies only) has stopped syncing; config stays healthy as the control topic.
+    In each task one lower-prior agent (planner or coder, drawn by seed) writes, then the verifier.
+    Agents are independent: neither sees the other's note. Nobody is told what is true."""
+    rng = random.Random(f"benchmark-d-stress:{seed}")
+
+    def block(counts: dict[str, int], phase: int) -> list[dict[str, Any]]:
+        out = []
+        for topic, n in counts.items():
+            for _ in range(n):
+                key = rng.choice(keys_for(topic))
+                old, new, decoy = rng.sample(CLAIMS[key]["values"], 3)
+                low = rng.choice(["planner", "coder"])
+                if phase == 1:
+                    views = [rng.choice(["current", "stale"]), "current"]
+                elif topic == STRESS_DEGRADED:
+                    views = ["current", "mirror"]
+                else:
+                    views = ["stale", "current"]
+                out.append({
+                    "origin": "controlled_env", "split": "stress", "experiment": "adaptive_trust_stress",
+                    "phase": phase, "scenario": f"p{phase}_{topic}_" + ("healthy" if phase == 1 else "mirror_frozen" if topic == STRESS_DEGRADED else "control"),
+                    "topic": topic, "claim_key": key, "project": rng.choice(PROJECTS),
+                    "query": rng.choice(CLAIMS[key]["queries"]), "steps": [low, "verifier"], "views": views,
+                    "lower_agent": low, "independent": True,
+                    "timeline": _timeline("changed", old, new, [low, "verifier"]), "decoy": decoy,
+                    "background": {k: rng.choice(CLAIMS[k]["values"]) for k in keys_for(topic) if k != key},
+                })
+        rng.shuffle(out)
+        return out
+
+    tasks = block(phase1, 1) + block(phase2, 2)  # phase order is fixed; order within a phase is seeded
+    frozen_day = sum(phase1.values()) - 1  # the mirror last synced on the final phase-1 day
+    for day, t in enumerate(tasks):
+        t["day"], t["position"] = day, day
+        t["mirror_frozen_day"] = frozen_day
+        t["task_id"] = f"stress-{day:03d}-{t['scenario']}"
+        t["truth"] = truth_at(t, QUERY_MIN)
+        t["stale_values"] = previous_true_values(t, QUERY_MIN)
+        t["source_kind"] = source_kind(t["topic"])
+        t["checks_before_query"] = []
+    return tasks
+
+
 def tasks_path(split: str) -> Path:
-    return TASKS_DIR / f"{split}.jsonl"
+    return STRESS_DIR / "tasks.jsonl" if split == "stress" else TASKS_DIR / f"{split}.jsonl"
 
 
-def write_tasks(split: str, seed: str, n: int) -> Path:
-    TASKS_DIR.mkdir(parents=True, exist_ok=True)
+def write_tasks(split: str, seed: str, n: int, tasks: list[dict[str, Any]] | None = None) -> Path:
     path = tasks_path(split)
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
-        for t in generate_tasks(split, seed, n):
+        for t in tasks if tasks is not None else generate_tasks(split, seed, n):
             f.write(json.dumps(t, sort_keys=True) + "\n")
     return path
 

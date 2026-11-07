@@ -113,3 +113,26 @@ primary_comparisons:
   - [learned_evidence, learned]
   - [learned_evidence, dense]
 bootstrap: {resamples: 2000, seed: 7}
+
+# --------------------------------------------------------------------------------------------
+# Secondary exploratory experiment: adaptive-trust stress (docs/BENCHMARK_D_ADAPTIVE_TRUST.md).
+# Design frozen before execution; not independently preregistered. Uses the models, retrieval
+# settings and trust parameters above unchanged. Results live under
+# results/benchmark_d/adaptive_trust_stress/ and are never pooled with pilot-v2.
+stress:
+  seed: stress-v1
+  phase1: {deps: 3, config: 3}    # every source healthy
+  phase2: {deps: 12, config: 7}   # the verifier's package mirror (deps only) stopped syncing
+  budget_usd: 5.0
+  methods:
+    dense: {technique: simple_rag, ablation: null, reliability: null, evidence: false}
+    static: {technique: collaborative, ablation: full_rerank, reliability: null, evidence: false}
+    learned: {technique: collaborative, ablation: full_rerank, reliability: beta, evidence: false}
+    learned_evidence: {technique: collaborative, ablation: full_rerank, reliability: beta, evidence: true}
+    # offline diagnostic only: learned trust without per-topic state (agent-level trust only)
+    learned_no_topic: {technique: collaborative, ablation: full_rerank, reliability: beta, per_topic: false, evidence: false}
+  comparisons:
+    - [learned, static]
+    - [learned_evidence, learned]
+    - [learned, learned_no_topic]
+    - [learned_evidence, dense]
