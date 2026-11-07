@@ -123,13 +123,13 @@ The first benchmark always has one correction, made by the most trusted agent. B
 
 trustmem does what it was built for: when the most trusted agent is right, it wins every time, including when the update never mentions the old note. When the most trusted agent is wrong or out of date, it follows that agent every time, which is worse than plain search (0 of 16 wrong-verifier runs against 9 of 16). Recency is also too weak to order two notes from the same agent: with a one-week half-life, a note written ten minutes later barely moves. The groups are small (3 to 8 tasks), so read these as patterns, not rates.
 
+`python -m experiments.hard_run all --provider xai --provider openai` reruns it, and each run writes `label_check.csv` so you can confirm every generated note says the fact it was labelled with.
+
 ### Trust is a prior
 
 The trust numbers in these runs come from roles: verifier 0.95, coder 0.70, planner 0.60. A role says who usually checks facts. It is not evidence that a given note is correct, and Benchmark B shows what happens when the two come apart. In practice you calibrate trust against things you can verify: tests that pass or fail, the production config, a human sign-off.
 
 Future work, not built yet: trust that starts from the role and then moves with each verified outcome, tracked per agent and per topic. A verifier whose notes keep being contradicted by the source of truth would lose rank, and a coder who keeps being right would gain it. trustmem stores `confidence` on every memory, so the retriever doesn't change; what's missing is the loop that updates those numbers.
-
-`python -m experiments.hard_run all --provider xai --provider openai` reruns it, and each run writes `label_check.csv` so you can confirm every generated note says the fact it was labelled with.
 
 Other limits: 40 tasks per model, written by me, with one clean correction each. Pinning the most trusted note to the top can occasionally pin the wrong note from that agent (it happened once in 120 runs). Below the top spot, an outdated note sometimes still ranks above the correction.
 
