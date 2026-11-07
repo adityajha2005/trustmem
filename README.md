@@ -21,16 +21,75 @@ I wanted numbers on how often this actually happens, so I ran 40 tasks like the 
 | Vector search + MS MARCO cross-encoder | 70% | 82% | 88% |
 | trustmem | **0%** | **0%** | **0%** |
 
-*How often the top result was the outdated note. 40 tasks per model; the 95% interval on 0/40 is 0–9%.*
+*How often the top result was the outdated note. 40 tasks per model; the 95% interval on 0/40 is 0 to 9%.*
 
 The cross-encoder mostly makes it worse. That's the part that surprised me.
 
 ## What trustmem does differently
 
-Every memory carries who wrote it, who can see it, how confident the author was, and whether it replaced an older note. Retrieval uses that in two places:
+Every memory carries who wrote it, who can see it, how confident the author was, and whether it replaced an older note. Retrieval uses that twice. Before the vector search, it drops what the asking agent isn't allowed to see, drops archived notes, and keeps only the latest version of anything that was superseded. This costs under a millisecond. After the search, it blends the cross-encoder score with the author's confidence, so a stale note that shares the question's wording can't push a confirmed correction down the list.
 
-- **Before search:** drop what the asking agent isn't allowed to see, drop archived notes, and keep only the latest version of anything that was superseded. This step costs under a millisecond.
-- **After search:** blend the cross-encoder score with the author's confidence, so a reranker can't push a confirmed correction below a stale note just because the stale one uses the same words as the question.
+## Architecture
+
+```
+  planner      coder      verifier          any agent: a LangGraph node, a script, an API client
+     │           │            │
+     └───── write(Memory) ────┘              read(query, agent, task)
+                 │                                     │
+                 ▼                                     ▼
+   ┌───────────────────────────┐     ┌─────────────────────────────────────────────────┐
+   │ storage/                  │     │ retrieval/   (every stage is timed)              │
+   │   SQLite (WAL)            │────▶│ 1 candidate_pool  SQL load by task and agent     │
+   │   one memories table      │     │ 2 scope_filter    LOCAL notes only for author    │
+   │   FAISS index             │     │ 3 archive_filter  drop archived notes            │
+   └───────────────────────────┘     │ 4 lineage_filter  drop superseded notes and      │
+                 ▲                   │                   open contradictions            │
+                 │                   │ 5 search          FAISS over BGE-small vectors   │
+   ┌───────────────────────────┐     │ 6 score_rank      similarity, trust, recency,    │
+   │ memory/                   │     │                   importance                     │
+   │   schema, scopes,         │────▶│ 7 rerank_fusion   cross-encoder fused with trust │
+   │   lineage, contradictions │     └────────────────────────┬────────────────────────┘
+   └───────────────────────────┘                              ▼
+                                               ranked hits + per-stage diagnostics
+```
+
+### The memory record
+
+`memory/schema.py` defines one pydantic model, `Memory`:
+
+| Field | Used for |
+|---|---|
+| `agent` | who wrote it; the trust signal comes from here |
+| `scope` | `SHARED` is readable by every agent on the task, `LOCAL` only by its author |
+| `confidence`, `importance` | both between 0 and 1, set by the writer |
+| `timestamp` | recency decay |
+| `supersedes`, `parent_memory` | the chain from an old note to the note that replaced it |
+| `archived` | hidden from retrieval unless you ask for it |
+| `task_id`, `memory_type` | candidate pool and filtering |
+
+`memory/lineage.py` builds the supersession chains and answers "what is the latest version of this". `memory/contradictions.py` keeps a registry of notes that conflict and how each conflict was resolved. Everything is stored in a single SQLite table (WAL mode) with the vectors in FAISS next to it.
+
+### Retrieval, stage by stage
+
+Stages 1 to 4 are plain filters. They run before any embedding work, so a note the agent can't see or that was replaced never reaches the ranker. Any later stage that ranks well can't bring it back.
+
+Stage 5 is ordinary dense search over BGE-small-en-v1.5 embeddings.
+
+Stage 6 scores each hit as `0.45·similarity + 0.25·trust + 0.15·recency + 0.15·importance`, with recency on a one-week half-life. The weights live in `configs/default.yaml`.
+
+Stage 7 runs the `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker, min-max normalizes its logits inside the batch, and fuses them:
+
+```
+fused = 0.30·similarity + 0.30·trust + 0.30·rerank + 0.10·importance
+```
+
+Fusion alone isn't enough when the reranker strongly prefers the stale note, so there are two guards. By default the most trusted hit is pinned to the top (`preserve_top_trusted_k: 1`). The alternative, `trust_bucket_reranking`, groups hits into trust tiers and lets the reranker reorder only inside a tier. Pinning has the failure listed below. Buckets avoid it but give up a little precision on long histories. `docs/RERANK_FUSION.md` has the details.
+
+Each result carries diagnostics: rank before and after reranking, whether trust pinned it, and how many notes each filter dropped. The benchmarks read those, and so can you when a result looks wrong.
+
+### Turning stages off
+
+`retrieval/ablation.py` defines `RetrievalAblation`, a set of switches for each stage (`no_lineage_filter`, `no_trust_scoring`, `with_naive_rerank`, and others). Pass one to `build_retriever(..., ablation=...)`. The agent experiment uses these to compare plain search, search plus reranker, and the full pipeline on the same notes.
 
 ## Where it breaks
 
@@ -43,9 +102,9 @@ The fix is only as good as your confidence numbers. I replayed the same 120 runs
 | A confidently wrong agent on 27.5% of tasks | 28% |
 | No signal (every agent the same) | 78%, same as plain search |
 
-So it fails on exactly the tasks where trust is wrong, and nowhere else. It doesn't remove the problem; it turns "retrieval picks the wrong note" into "decide who to trust", which is a problem you can actually work on.
+It fails on exactly the tasks where trust is wrong. What you get is a different problem: instead of retrieval picking the wrong note, you have to decide who to trust, and that one you can measure and work on.
 
-Other honest limits: 40 tasks per model, written by me, with one clean correction each. Pinning the most trusted note to the top can occasionally pin the wrong note from that agent (it happened once in 120 runs). Below the top spot, an outdated note sometimes still ranks above the correction.
+Other limits: 40 tasks per model, written by me, with one clean correction each. Pinning the most trusted note to the top can occasionally pin the wrong note from that agent (it happened once in 120 runs). Below the top spot, an outdated note sometimes still ranks above the correction.
 
 ## Setup
 
@@ -88,7 +147,7 @@ There are also scripted, LLM-free scenarios and an ablation grid. Some of the ab
 | Compare against other memory designs (RAG, Mem0, BM25 hybrid, MemGPT- and A-MEM-style) | `python scripts/run_experiments.py techniques --seed 42` |
 | API server | `uvicorn api.main:app --reload` |
 
-Details are in `docs/`: `ARCHITECTURE.md` for the pipeline, `BENCHMARKS.md` for every benchmark, and `ABLATION_FAILURES.md` for the failures that are supposed to happen.
+`docs/BENCHMARKS.md` lists every benchmark and `docs/ABLATION_FAILURES.md` explains the failures that are supposed to happen.
 
 ## Layout
 
@@ -99,6 +158,8 @@ storage/      SQLite (WAL) storage
 baselines/    the other memory designs used for comparison
 benchmarks/   scripted scenarios
 experiments/  agent experiment, ablations, plots
+agents/       agent base class
+orchestration/ LangGraph coordination graph
 evaluation/   metrics
 api/          FastAPI server
 ```
