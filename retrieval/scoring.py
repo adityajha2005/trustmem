@@ -48,16 +48,17 @@ class ScoredMemory:
 
 def trust_score(memory: Memory, ctx: RetrievalContext) -> float:
     """
-    Trust signal from agent confidence and authorship.
+    How far to trust a note, for ranking.
 
-    Self-authored memories score 1.0; shared memories use stored confidence.
+    Authorship never implies correctness: an agent's own notes get no automatic boost
+    (visibility is handled by the scope filter, not here). A note whose value is verified
+    by external evidence gets 1.0; otherwise the context's trust function, or the note's
+    stored confidence when there is none.
     """
-    if memory.agent == ctx.agent_id:
+    if ctx.evidence is not None and ctx.evidence.supports(memory, ctx.now):
         return 1.0
-    if memory.confidence < ctx.min_trust:
-        return 0.0
-    # TODO: Trust-aware retrieval — agent reputation, corroboration, decay
-    return memory.confidence
+    trust = ctx.trust(memory) if ctx.trust is not None else memory.confidence
+    return 0.0 if trust < ctx.min_trust else trust
 
 
 def recency_score(

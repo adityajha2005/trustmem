@@ -9,7 +9,8 @@ from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.orm import Session
 
 from memory.schema import Memory, MemoryScope, MemoryType, utc_now
-from storage.models import MemoryModel
+from memory.evidence import VerificationEvent
+from storage.models import MemoryModel, VerificationEventModel
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +30,9 @@ def _row_to_memory(row: MemoryModel) -> Memory:
         parent_memory=UUID(row.parent_memory) if row.parent_memory else None,
         supersedes=UUID(row.supersedes) if row.supersedes else None,
         archived=row.archived,
+        claim_key=row.claim_key,
+        claim_value=row.claim_value,
+        valid_until=row.valid_until,
     )
 
 
@@ -46,6 +50,9 @@ def _memory_to_row(memory: Memory) -> MemoryModel:
         parent_memory=str(memory.parent_memory) if memory.parent_memory else None,
         supersedes=str(memory.supersedes) if memory.supersedes else None,
         archived=memory.archived,
+        claim_key=memory.claim_key,
+        claim_value=memory.claim_value,
+        valid_until=memory.valid_until.astimezone(UTC) if memory.valid_until else None,
     )
 
 
@@ -90,9 +97,28 @@ class SQLiteMemoryStore:
         row.parent_memory = str(memory.parent_memory) if memory.parent_memory else None
         row.supersedes = str(memory.supersedes) if memory.supersedes else None
         row.archived = memory.archived
+        row.claim_key = memory.claim_key
+        row.claim_value = memory.claim_value
+        row.valid_until = memory.valid_until.astimezone(UTC) if memory.valid_until else None
         self._session.flush()
         logger.debug("Updated memory %s", memory.id)
         return _row_to_memory(row)
+
+    def add_event(self, event: VerificationEvent) -> None:
+        """Record an external (or agent) verification of a claim."""
+        self._session.add(VerificationEventModel(**event.model_dump(mode="python")))
+        self._session.flush()
+
+    def list_events(self, claim_key: str | None = None) -> list[VerificationEvent]:
+        stmt = select(VerificationEventModel).order_by(VerificationEventModel.at)
+        if claim_key is not None:
+            stmt = stmt.where(VerificationEventModel.claim_key == claim_key)
+        return [
+            VerificationEvent(
+                claim_key=r.claim_key, value=r.value, source_kind=r.source_kind, source_id=r.source_id, at=r.at
+            )
+            for r in self._session.scalars(stmt)
+        ]
 
     def delete(self, memory_id: UUID) -> bool:
         """Permanently delete a memory."""

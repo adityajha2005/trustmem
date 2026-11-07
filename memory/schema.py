@@ -52,6 +52,18 @@ class Memory(BaseModel):
     parent_memory: UUID | None = None
     supersedes: UUID | None = None
     archived: bool = False
+    # Claim identity (optional): notes sharing a claim_key are versions of, or competitors
+    # for, one fact. The topic used for per-topic trust is the prefix before the first dot.
+    claim_key: str | None = None
+    claim_value: str | None = None
+    valid_until: datetime | None = None
+
+    @field_validator("valid_until")
+    @classmethod
+    def ensure_valid_until_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
     @field_validator("timestamp")
     @classmethod
@@ -71,6 +83,3 @@ class Memory(BaseModel):
     def with_archived(self, archived: bool = True) -> Self:
         return self.model_copy(update={"archived": archived})
 
-    # TODO: Contradiction resolution — link contested memories and resolution outcome
-    # TODO: Temporal reasoning — valid_from / valid_until windows for collaborative timelines
-    # TODO: Memory lineage tracking — traverse parent_memory / supersedes chains

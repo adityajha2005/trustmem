@@ -52,3 +52,19 @@ class MemoryModel(Base):
         index=True,
     )
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    claim_key: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    claim_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VerificationEventModel(Base):
+    """An external check of a claim (test, config read, human sign-off, or agent)."""
+
+    __tablename__ = "verification_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    claim_key: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

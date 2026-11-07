@@ -22,10 +22,12 @@ def test_recency_decays_with_age() -> None:
     assert fresh > old
 
 
-def test_trust_self_authored() -> None:
-    mem = Memory(content="x", agent="a", scope=MemoryScope.SHARED, confidence=0.3)
-    ctx = RetrievalContext(agent_id="a", min_trust=0.5)
-    assert trust_score(mem, ctx) == 1.0
+def test_authorship_does_not_imply_trust() -> None:
+    # An agent's own note is ranked like anyone else's: no automatic 1.0, for any scope.
+    for scope in MemoryScope:
+        mem = Memory(content="x", agent="a", scope=scope, confidence=0.3)
+        assert trust_score(mem, RetrievalContext(agent_id="a")) == 0.3
+        assert trust_score(mem, RetrievalContext(agent_id="a", min_trust=0.5)) == 0.0
 
 
 def test_compute_final_score_weighted() -> None:

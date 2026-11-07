@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -17,7 +18,7 @@ from retrieval.embedder import MemoryEmbedder
 from retrieval.hybrid_search import fuse_pools, split_by_scope
 from retrieval.rerank_fusion import RerankDiagnostics, fuse_rerank
 from retrieval.reranker import CrossEncoderReranker
-from retrieval.scoring import ScoringWeights, rank_memories
+from retrieval.scoring import ScoredMemory, ScoringWeights, rank_memories
 from retrieval.vector_store import FaissVectorStore
 from storage.repository import MemoryRepository
 from utils.config import AppConfig, load_config
@@ -40,6 +41,9 @@ class RetrievalResult:
     filtered_archived: int = 0
     filtered_lineage: int = 0
     rerank_diagnostics: RerankDiagnostics | None = None
+    # Set only when ctx.evidence is given: the top hit's claim has competing values that
+    # neither external evidence nor a clear trust margin separates. Order is not changed.
+    contested: bool = False
 
 
 class CollaborativeMemoryRetriever:
@@ -174,6 +178,8 @@ class CollaborativeMemoryRetriever:
             hits = hits[:k]
 
         result.hits = hits
+        if ctx.evidence is not None and hits:
+            result.contested = _contested(ranked, hits[0]["memory_id"], ctx)
         logger.debug("Retrieved %d hits for query %r", len(hits), query)
         return result
 
@@ -307,11 +313,15 @@ class CollaborativeMemoryRetriever:
     ) -> tuple[list[Memory], int]:
         """Drop superseded memories and apply open-contradiction policy."""
         lineage = LineageIndex.from_memories(records)
-        return self._contradictions.filter_for_retrieval(
+        kept, dropped = self._contradictions.filter_for_retrieval(
             records,
             lineage,
             include_archived=ctx.include_archived,
         )
+        if ctx.evidence is not None:
+            kept, more = ctx.evidence.filter(kept, ctx.now or datetime.now(UTC))
+            dropped += more
+        return kept, dropped
 
     def _timed_lineage(
         self, records: list[Memory], ctx: RetrievalContext
@@ -341,6 +351,24 @@ def _flat_keyword_scores(query: str, candidates: list[Memory]) -> dict[str, floa
         overlap = len(tokens & content_tokens) / len(tokens)
         scores[str(memory.id)] = overlap
     return scores
+
+
+def _contested(ranked: list[ScoredMemory], top_id: str, ctx: RetrievalContext) -> bool:
+    """Does the top hit's claim have competing values that nothing separates?"""
+    top = next((s.memory for s in ranked if str(s.memory.id) == top_id), None)
+    if top is None or not top.claim_key:
+        return False
+    verdict = ctx.evidence.verdict(top.claim_key, ctx.now)
+    if verdict.contested:
+        return True
+    if verdict.value is not None:
+        return False
+    best: dict[str | None, float] = {}
+    for s in ranked:
+        if s.memory.claim_key == top.claim_key:
+            best[s.memory.claim_value] = max(best.get(s.memory.claim_value, 0.0), s.trust_score)
+    top_two = sorted(best.values(), reverse=True)[:2]
+    return len(top_two) == 2 and top_two[0] - top_two[1] < ctx.contested_margin
 
 
 def build_retriever(
