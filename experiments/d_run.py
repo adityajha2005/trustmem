@@ -228,7 +228,9 @@ def replay(method: str, tasks: list[dict[str, Any]], writes: list[dict[str, Any]
                 trust_now = {r: (rel.trust(r, t["topic"]) if rel else prior[r]) for r in prior}
                 ctx = RetrievalContext(
                     agent_id="reader", task_id=t["task_id"], now=now,
-                    trust=(lambda m, rel=rel: rel.trust(m.agent, topic_of(m.claim_key))) if rel else None,
+                    # Unkeyed notes (the "other_note") take the task's topic, so an agent's notes in one
+                    # task share one trust value, as they share one confidence under static trust.
+                    trust=(lambda m, rel=rel, tp=t["topic"]: rel.trust(m.agent, topic_of(m.claim_key) or tp)) if rel else None,
                     evidence=Evidence(before) if spec["evidence"] else None,
                 )
                 start = time.perf_counter()
@@ -375,6 +377,7 @@ def agent_summary(model_dir: Path) -> dict[str, Any]:
     return {
         "calls": len(calls), "api_errors": sum(1 for c in _jsonl(model_dir / "agent_calls.jsonl") if "error" in c),
         "models_returned": sorted({c["model_returned"] for c in calls}),
+        "truncated_by_token_cap": sum(c.get("finish_reason") == "length" for c in calls),
         "prompt_tokens": tok("prompt_tokens"), "completion_tokens": tok("completion_tokens"),
         "reasoning_tokens": tok("reasoning_tokens"), "cached_tokens": tok("cached_tokens"),
         "cost_usd": round(sum(c["cost_usd"] for c in calls), 6),
@@ -443,6 +446,10 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
         "python": platform.python_version(),
         "embeddings": "hash (offline)" if offline else app.embedding_model,
         "reranker": "none (offline)" if offline else app.reranker_model,
+        "retrieval_settings": {k: getattr(app, k, None) for k in (
+            "embedding_model", "reranker_model", "use_reranker", "retrieval_top_k", "retrieval_candidate_k",
+            "recency_half_life_hours", "offline_retrieval")} | {"weights": {
+            k: v for k, v in app.model_dump().items() if k.startswith("weight") or k.endswith("_weight")}},
         "models": {md.name: agents[md.name]["models_returned"] for md in model_dirs},
         "n_tasks_scored": {md.name: len({r["task_id"] for r in rows if r["model_name"] == md.name}) for md in model_dirs},
         "llm_calls": sum(a["calls"] for a in agents.values()),

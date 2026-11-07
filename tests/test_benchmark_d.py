@@ -140,6 +140,15 @@ def test_openai_client_stops_without_key(monkeypatch) -> None:
         d_agents.OpenAICompatClient("openai", "gpt-6-luna")
 
 
+def test_each_provider_gets_its_own_key_and_endpoint(monkeypatch) -> None:
+    monkeypatch.setenv("XAI_API_KEY", "x-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "o-test")
+    xai = d_agents.OpenAICompatClient("xai", "grok-4.7")  # constructing makes no network call
+    oai = d_agents.OpenAICompatClient("openai", "gpt-6-luna")
+    assert (xai._client.api_key, str(xai._client.base_url).rstrip("/")) == ("x-test", "https://api.x.ai/v1")
+    assert (oai._client.api_key, str(oai._client.base_url).rstrip("/")) == ("o-test", "https://api.openai.com/v1")
+
+
 def test_unparseable_reply_is_retried_then_recorded_not_dropped(tmp_path) -> None:
     tasks = _tasks(2)
     client = d_agents.MockClient("gpt-6-luna", bad_reply_every=1)

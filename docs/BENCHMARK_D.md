@@ -155,3 +155,20 @@ python -m experiments.d_run evaluate --run-id mock-pilot --split pilot
 - An agent whose fact later changed is judged against the new value unless it recorded an expiry (inherited from `judge`).
 - Temperature 0 doesn't make runs repeatable. A repeat of about 20 tasks on one model will measure run-to-run variation.
 - About 10 tasks per scenario per model is enough only for pooled conclusions.
+
+## Changes made before the pilot (no live data existed yet)
+
+These were found during the Stage 2 review, using the offline mock run.
+
+1. **Notes without a claim key got a different trust from the same agent's claim notes (`d_run.replay`).** The learned trust callable gave an agent's unrelated "other" note its agent-level trust, but its claim note its topic-blended trust. Static trust gives both the same `confidence`. In the mock run this made learned trust put an unrelated note first in 12 of 25 tasks, against 5 for static. Unkeyed notes now take the task's topic, which brings it to 5 of 25 for both. The library code (`memory/`, `retrieval/`) is unchanged.
+2. **The xAI client could send the wrong key.** It now passes its own key explicitly. Without that, the OpenAI SDK falls back to `OPENAI_API_KEY`. A test covers it.
+3. **New fields in the manifest and summary.**
+   - The manifest records the non-secret retrieval settings: embedding model, reranker, top-k and weights.
+   - The agent summary counts replies cut off by the token cap (`finish_reason == "length"`).
+
+### Differences from the Stage 1 proposal
+
+- Agents see the earlier notes of the same task in time order, instead of a neutral vector search over earlier notes.
+- Temperature 0 has no fallback. If a model rejects it, the pilot stops and the config gets a new version.
+- The design commit and the harness commit were made in the same session, minutes apart. That is a commit order, not an independent freeze.
+- The repeat subset will be `generate --limit 20` under a new run id.

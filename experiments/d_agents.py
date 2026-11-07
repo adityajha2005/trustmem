@@ -150,12 +150,14 @@ class OpenAICompatClient:
 
     def __init__(self, provider: str, model_id: str) -> None:
         key_env, url_env, url_default = PROVIDERS[provider]
-        if not os.getenv(key_env, "").strip():
+        api_key = os.getenv(key_env, "").strip()
+        if not api_key:
             raise SystemExit(f"{key_env} is not set. Stopping: credentials are not created or changed by this tool.")
         from openai import OpenAI
 
         self.provider, self.model_id = provider, model_id
-        self._client = OpenAI(base_url=os.getenv(url_env, url_default), max_retries=0)
+        # The provider's own key, explicitly: the SDK would otherwise fall back to OPENAI_API_KEY.
+        self._client = OpenAI(api_key=api_key, base_url=os.getenv(url_env, url_default), max_retries=0)
 
     def complete(self, messages: list[dict[str, str]], params: dict[str, Any]) -> Reply:
         import openai
