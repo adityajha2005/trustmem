@@ -5,6 +5,8 @@
     python -m experiments.d_run generate --split pilot --model grok-4.7 --mock --run-id mock-pilot
     python -m experiments.d_run generate --split pilot --model grok-4.7      # LIVE: needs approval
     python -m experiments.d_run evaluate --run-id pilot-v1     # offline replay + metrics (rescoring)
+    python -m experiments.d_run generate --split stress --model gpt-6-luna --run-id stress-v1  # LIVE: needs approval
+    python -m experiments.d_run evaluate --split stress --run-id stress-v1  # adaptive-trust stress (own tree)
 
 Layers and where each lives:
   A. controlled environment (generated, no LLM)       d_env.py   -> tasks/<split>.jsonl
@@ -49,8 +51,21 @@ RUNS = RESULTS / "runs"
 SECRET_PATTERN = re.compile(r"(sk-[A-Za-z0-9_-]{20,}|xai-[A-Za-z0-9_-]{20,})")
 
 
-def load_config() -> dict[str, Any]:
-    return yaml.safe_load(CONFIG_PATH.read_text())
+def load_config(split: str | None = None) -> dict[str, Any]:
+    cfg = yaml.safe_load(CONFIG_PATH.read_text())
+    return stress_config(cfg) if split == "stress" else cfg
+
+
+def stress_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The adaptive-trust stress experiment: same models, retrieval and trust parameters; its own
+    methods (plus the offline no-per-topic diagnostic), comparisons and $5 cap."""
+    s = cfg["stress"]
+    return {**cfg, "methods": s["methods"], "primary_comparisons": s["comparisons"], "budget_usd": {"stress": s["budget_usd"]}}
+
+
+def runs_for(split: str | None) -> Path:
+    """Stress traces live in their own tree, never next to pilot-v2."""
+    return d_env.STRESS_DIR / "runs" if split == "stress" else RUNS
 
 
 def _jsonl(path: Path) -> list[dict[str, Any]]:
@@ -108,7 +123,8 @@ def generate(split: str, model_name: str, run_id: str, *, client: d_agents.Clien
                 continue
             view = next(views)
             doc = d_env.view_document(t, view, minute)
-            messages = d_agents.build_messages(step, t, at(t, minute).isoformat().replace("+00:00", "Z"), doc, shown)
+            notes = [] if t.get("independent") else shown  # stress tasks: agents never see teammates' notes
+            messages = d_agents.build_messages(step, t, at(t, minute).isoformat().replace("+00:00", "Z"), doc, notes)
             parsed, error, call_ids = None, None, []
             for attempt in range(cfg["calls"]["max_parse_attempts"]):
                 meta = {"run_id": run_id, "model_name": model_name, "task_id": t["task_id"], "step": i,
@@ -163,13 +179,13 @@ def pinned_config(name: str, tmp: Path, cfg: dict[str, Any]):
     return config
 
 
-def make_reliability(kind: str | None, cfg: dict[str, Any]):
+def make_reliability(kind: str | None, cfg: dict[str, Any], per_topic: bool = True):
     from memory.reliability import BetaReliability
 
     if kind is None:
         return None
     return BetaReliability(cfg["role_prior"], prior_strength=cfg["prior_strength"], retention=cfg["retention"],
-                           topic_threshold=cfg["topic_threshold"])
+                           topic_threshold=cfg["topic_threshold"], per_topic=per_topic)
 
 
 def _event(c: dict[str, Any]):
@@ -187,7 +203,7 @@ def replay(method: str, tasks: list[dict[str, Any]], writes: list[dict[str, Any]
     from benchmarks._helpers import reset_storage_engine
     from experiments.real_run import _ablation
     from memory.evidence import Evidence, expired, topic_of
-    from memory.reliability import learn
+    from memory.reliability import judge, learn
     from memory.schema import Memory, MemoryScope
     from retrieval.context import RetrievalContext
     from storage import init_db, session_scope
@@ -213,7 +229,7 @@ def replay(method: str, tasks: list[dict[str, Any]], writes: list[dict[str, Any]
             store = SQLiteMemoryStore(session)
             backend = create_backend(spec["technique"], MemoryRepository(session), config, work_dir=tmp,
                                      ablation=_ablation(spec["ablation"]))
-            rel = make_reliability(spec["reliability"], cfg)
+            rel = make_reliability(spec["reliability"], cfg, spec.get("per_topic", True))
             for t in tasks:
                 if not any(c["phase"] == "after_query" for c in by_task_c[t["task_id"]]):
                     continue  # task not generated (yet)
@@ -252,10 +268,13 @@ def replay(method: str, tasks: list[dict[str, Any]], writes: list[dict[str, Any]
                 rows.append(score(t, method, ranked, live, before, result.contested, latency, trust_now, prior,
                                   [info[str(m.id)] for m in mems]))
                 if rel is not None:
+                    judged = []
                     for c in by_task_c[t["task_id"]]:
                         if c["phase"] == "after_query":
+                            judged += judge(_event(c), mems)
                             learn(rel, _event(c), mems)
-                    snapshots.append({"origin": "replay", "method": method, "task_id": t["task_id"],
+                    snapshots.append({"origin": "replay", "method": method, "task_id": t["task_id"], "topic": t["topic"],
+                                      "judged": [[a, ok] for a, ok in judged],
                                       "after_learning": {f"{a}|{tp}": round(rel.trust(a, tp), 6)
                                                          for a in prior for tp in [None, *d_env.TOPICS]}})
             backend.close()
@@ -291,6 +310,7 @@ def score(t, method, ranked, live, before, contested, latency, trust_now, prior,
     return {
         "origin": "replay", "task_id": t["task_id"], "scenario": t["scenario"], "topic": t["topic"],
         "position": t["position"], "method": method, "truth": t["truth"],
+        "phase": t.get("phase"), "lower_agent": t.get("lower_agent"),
         "correct@1": labels[:1] == ["correct"], "correct@3": "correct" in labels[:3],
         "stale@1": labels[:1] == ["stale"], "refuted@1": labels[:1] == ["refuted"], "off_key@1": labels[:1] in (["off_key"], []),
         "has_pre_query_evidence": bool(before),
@@ -438,7 +458,7 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
         tasks = d_env.load_tasks(split)
     rows: list[dict[str, Any]] = []
     out.mkdir(parents=True, exist_ok=True)
-    agents = {}
+    agents, snaps_by = {}, {}
     for md in model_dirs:
         writes, checks = _jsonl(md / "writes.jsonl"), _jsonl(md / "checks.jsonl")
         (out / md.name).mkdir(exist_ok=True)
@@ -450,9 +470,15 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
                 x["model_name"] = md.name
             _append(out / md.name / "scores.jsonl", r)
             _append(out / md.name / "trust.jsonl", snaps)
+            snaps_by[(md.name, method)] = snaps
             rows += r
         agents[md.name] = agent_summary(md)
     summary = {"retrieval": summarize(rows, cfg), "agents": agents}
+    if split == "stress":
+        summary["stress"] = {md.name: stress_analysis(tasks, [r for r in rows if r["model_name"] == md.name],
+                                                      {m: snaps_by[(md.name, m)] for m in cfg["methods"]},
+                                                      _jsonl(md / "writes.jsonl"), cfg["role_prior"])
+                             for md in model_dirs}
     offline = os.getenv("MEMORY_OFFLINE_RETRIEVAL", "").lower() in ("1", "true", "yes")
     manifest = {
         "run_id": run_id, "eval_name": eval_name, "created": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -472,11 +498,119 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True))
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
-    (out / "report.md").write_text(report(summary, cfg))
+    (out / "report.md").write_text(report(summary, cfg) + (stress_report(summary["stress"]) if "stress" in summary else ""))
     assert_no_secrets(run_dir, cfg.get("credentials_file"))
     sums = sorted(p for p in run_dir.rglob("*") if p.is_file() and p.name != "SHA256SUMS")
     (run_dir / "SHA256SUMS").write_text("".join(f"{_sha(p)}  {p.relative_to(run_dir)}\n" for p in sums))
     return summary
+
+
+# --------------------------------------------------------------------------------------------
+# Adaptive-trust stress analysis: when trust changes vs when rankings change (separate outcomes)
+# --------------------------------------------------------------------------------------------
+
+DEGRADED, CONTROL = d_env.STRESS_DEGRADED, d_env.STRESS_CONTROL
+
+
+def stress_analysis(tasks: list[dict[str, Any]], rows: list[dict[str, Any]], snaps: dict[str, list[dict[str, Any]]],
+                    writes: list[dict[str, Any]], prior: dict[str, float]) -> dict[str, Any]:
+    """One model's stream. Every count of 'incorrect verifier checks' is the number of post-query
+    harness checks, in earlier tasks, that judged the verifier's deps claim wrong (from the
+    recorded judgements, not from the scripted view)."""
+    order = [t["task_id"] for t in tasks]
+    by = {(r["method"], r["task_id"]): r for r in rows}
+    judged = {s["task_id"]: s["judged"] for s in snaps.get("learned", [])}
+    wrong_before, n = {}, 0
+    for t in tasks:
+        wrong_before[t["task_id"]] = n
+        n += sum(1 for a, ok in judged.get(t["task_id"], []) if a == "verifier" and not ok and t["topic"] == DEGRADED)
+    deps2 = [t for t in tasks if t["topic"] == DEGRADED and t.get("phase") == 2 and ("learned", t["task_id"]) in by]
+
+    def first(pred, method: str = "learned") -> dict[str, Any] | None:
+        for t in deps2:
+            if pred(t, by[(method, t["task_id"])]):
+                return {"task_id": t["task_id"], "phase2_deps_index": deps2.index(t),
+                        "incorrect_verifier_checks_before": wrong_before[t["task_id"]]}
+        return None
+
+    def trust_swap(method: str, role: str | None):
+        def pred(t, r):
+            low = role or t["lower_agent"]
+            return r["trust_at_query"]["verifier"] < r["trust_at_query"][low]
+        return first(pred, method)
+
+    top = lambda m, tid: (by[(m, tid)]["ranked"][0]["role"] if by.get((m, tid)) and by[(m, tid)]["ranked"] else None)  # noqa: E731
+    transitions = {}
+    for m in ("learned", "learned_no_topic"):
+        if not any(k[0] == m for k in by):
+            continue
+        transitions[m] = {
+            "trust_first_drop_below_prior": first(lambda t, r: r["trust_at_query"]["verifier"] < prior["verifier"] - 1e-9, m),
+            "trust_swap_vs_task_lower_agent": trust_swap(m, None),
+            "trust_swap_vs_coder": trust_swap(m, "coder"),
+            "trust_swap_vs_planner": trust_swap(m, "planner"),
+            "ranking_first_top1_role_differs_from_static": first(lambda t, r, m=m: top(m, t["task_id"]) != top("static", t["task_id"]), m),
+            "first_correct_where_static_wrong": first(
+                lambda t, r: r["correct@1"] and not by[("static", t["task_id"])]["correct@1"], m),
+        }
+
+    def differ(m: str, scen: str) -> dict[str, Any]:
+        ids = [t["task_id"] for t in tasks if t["scenario"] == scen and (m, t["task_id"]) in by]
+        k = sum(by[(m, i)]["ranked"][:1] != by[("static", i)]["ranked"][:1] for i in ids)
+        return {"k": k, "n": len(ids)}
+
+    scens = sorted({t["scenario"] for t in tasks})
+    ranking_changed = {m: {sc: differ(m, sc) for sc in scens} for m in ("learned", "learned_evidence", "learned_no_topic")
+                       if any(k[0] == m for k in by)}
+    control = {}
+    for m in ("learned", "learned_no_topic"):
+        s2 = [s for s in snaps.get(m, []) if s["task_id"] in order and tasks[order.index(s["task_id"])].get("phase") == 2]
+        if s2:
+            control[m] = {"min_verifier_config_trust_phase2": min(s["after_learning"][f"verifier|{CONTROL}"] for s in s2),
+                          "verifier_config_trust_end": s2[-1]["after_learning"][f"verifier|{CONTROL}"],
+                          "verifier_deps_trust_end": s2[-1]["after_learning"][f"verifier|{DEGRADED}"]}
+    # Agent behaviour: did the scripted reliability change actually show up in the real agents?
+    wt = {t["task_id"]: t for t in tasks}
+    agents: dict[str, list[bool]] = defaultdict(list)
+    for w in writes:
+        t = wt.get(w["task_id"])
+        if t:
+            who = "verifier" if w["role"] == "verifier" else "lower_agent"
+            agents[f"{t['scenario']}|{who}|{w['view']}"].append(bool(w.get("correct_at_write")))
+    return {
+        "transitions": transitions,
+        "ranking_changed_vs_static_top1": ranking_changed,
+        "topic_control": control,
+        "agent_correct_at_write": {k: {"k": sum(v), "n": len(v)} for k, v in sorted(agents.items())},
+        "verifier_wrong_deps_checks_total": n,
+        "trust_trace": [{"task_id": tid, "scenario": by[("learned", tid)]["scenario"],
+                         "lower_agent": by[("learned", tid)]["lower_agent"],
+                         "learned": by[("learned", tid)]["trust_at_query"],
+                         "learned_no_topic": by.get(("learned_no_topic", tid), {}).get("trust_at_query"),
+                         "incorrect_verifier_checks_before": wrong_before[tid],
+                         "top1": {m: top(m, tid) for m in ("static", "learned", "learned_no_topic") if (m, tid) in by},
+                         "correct@1": {m: by[(m, tid)]["correct@1"] for m in ("dense", "static", "learned", "learned_evidence", "learned_no_topic") if (m, tid) in by}}
+                        for tid in order if ("learned", tid) in by],
+    }
+
+
+def stress_report(stress: dict[str, Any]) -> str:
+    lines = ["", "# Adaptive-trust stress analysis", "",
+             "Counts in brackets: incorrect verifier checks on deps (post-query harness checks) before the transition.", ""]
+    for mn, a in stress.items():
+        lines += [f"## {mn}", "", "| Transition | learned | learned_no_topic |", "|---|---|---|"]
+        for k in ("trust_first_drop_below_prior", "trust_swap_vs_task_lower_agent", "trust_swap_vs_coder",
+                  "trust_swap_vs_planner", "ranking_first_top1_role_differs_from_static", "first_correct_where_static_wrong"):
+            cell = lambda m: (lambda x: "never" if x is None else f"{x['task_id']} [{x['incorrect_verifier_checks_before']}]")(  # noqa: E731
+                a["transitions"].get(m, {}).get(k)) if m in a["transitions"] else "n/a"
+            lines.append(f"| {k} | {cell('learned')} | {cell('learned_no_topic')} |")
+        lines += ["", "Top-1 differs from static (k/n tasks):", "", "| Scenario | " + " | ".join(a["ranking_changed_vs_static_top1"]) + " |",
+                  "|---|" + "---|" * len(a["ranking_changed_vs_static_top1"])]
+        for sc in next(iter(a["ranking_changed_vs_static_top1"].values()), {}):
+            lines.append(f"| {sc} | " + " | ".join(f"{v[sc]['k']}/{v[sc]['n']}" for v in a["ranking_changed_vs_static_top1"].values()) + " |")
+        lines += ["", f"Topic control: `{json.dumps(a['topic_control'])}`", "",
+                  f"Verifier judged wrong on deps: {a['verifier_wrong_deps_checks_total']} checks", ""]
+    return "\n".join(lines) + "\n"
 
 
 def _fmt(p: dict[str, Any]) -> str:
@@ -545,25 +679,30 @@ def estimate(split: str, cfg: dict[str, Any] | None = None, out_low: int = 300, 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("command", choices=["tasks", "estimate", "generate", "evaluate"])
-    ap.add_argument("--split", choices=["pilot", "full"])
+    ap.add_argument("--split", choices=["pilot", "full", "stress"])
     ap.add_argument("--model")
     ap.add_argument("--run-id")
     ap.add_argument("--mock", action="store_true", help="offline mock agents (run id must start with 'mock')")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--eval-name", default="eval-v1")
     args = ap.parse_args(argv)
-    cfg = load_config()
-    if args.command == "tasks":
+    cfg = load_config(args.split)
+    runs_dir = runs_for(args.split)
+    if args.command == "tasks" and args.split == "stress":
+        s = cfg["stress"]
+        tasks = d_env.generate_stress_tasks(s["seed"], s["phase1"], s["phase2"])
+        print(f"{len(tasks)} tasks -> {d_env.write_tasks('stress', s['seed'], len(tasks), tasks)}")
+    elif args.command == "tasks":
         s = cfg["splits"][args.split]
         print(f"{s['tasks']} tasks -> {d_env.write_tasks(args.split, s['seed'], s['tasks'])}")
     elif args.command == "estimate":
         print(json.dumps(estimate(args.split, cfg), indent=2))
     elif args.command == "generate":
         run_id = args.run_id or (f"mock-{args.split}" if args.mock else f"{args.split}-v1")
-        generate(args.split, args.model, run_id, mock=args.mock, cfg=cfg, limit=args.limit)
+        generate(args.split, args.model, run_id, mock=args.mock, cfg=cfg, limit=args.limit, runs_dir=runs_dir)
     else:
-        evaluate(args.run_id, eval_name=args.eval_name, cfg=cfg, split=args.split)
-        print(f"report -> {RUNS / args.run_id / args.eval_name / 'report.md'}")
+        evaluate(args.run_id, eval_name=args.eval_name, cfg=cfg, split=args.split, runs_dir=runs_dir)
+        print(f"report -> {runs_dir / args.run_id / args.eval_name / 'report.md'}")
     return 0
 
 

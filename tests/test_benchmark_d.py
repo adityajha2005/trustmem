@@ -272,3 +272,123 @@ def test_wilson_and_bootstrap() -> None:
     c = d_run.paired_bootstrap(rows, "a", "b", 500, 1)
     assert c["diff"] == 0.5 and c["ci95"][0] > 0 and c == d_run.paired_bootstrap(rows, "a", "b", 500, 1)
 
+
+
+# --- adaptive-trust stress experiment (secondary, exploratory) --------------------------------
+
+SCFG = d_run.load_config("stress")
+
+
+def _ideal_trust(per_topic: bool) -> list[dict]:
+    """The real BetaReliability over the frozen stress stream, with idealised agents (a current view
+    is right, a stale or mirror view is wrong). Trust at each query, as replay computes it."""
+    from memory.reliability import BetaReliability
+
+    r = BetaReliability(SCFG["role_prior"], prior_strength=SCFG["prior_strength"], retention=SCFG["retention"],
+                        topic_threshold=SCFG["topic_threshold"], per_topic=per_topic)
+    out, wrong = [], 0
+    for t in d_env.load_tasks("stress"):
+        out.append({"t": t, "wrong_before": wrong, "v": r.trust("verifier", t["topic"]),
+                    "low": r.trust(t["lower_agent"], t["topic"]), "coder": r.trust("coder", "deps"),
+                    "planner": r.trust("planner", "deps"), "v_config": r.trust("verifier", "config")})
+        for role, view in zip(t["steps"], t["views"], strict=True):
+            r.observe(role, t["topic"], view == "current")
+            wrong += role == "verifier" and t["topic"] == "deps" and view != "current"
+    return out
+
+
+def _first(trace: list[dict], pred) -> int | None:
+    return next((x["wrong_before"] for x in trace if x["t"]["phase"] == 2 and x["t"]["topic"] == "deps" and pred(x)), None)
+
+
+def test_frozen_stress_tasks_match_generator_and_design() -> None:
+    s = SCFG["stress"]
+    on_disk = d_env.load_tasks("stress")
+    regen = d_env.generate_stress_tasks(s["seed"], s["phase1"], s["phase2"])
+    assert [json.dumps(t, sort_keys=True) for t in regen] == [json.dumps(t, sort_keys=True) for t in on_disk]
+    assert len(on_disk) == 25 and all(t["independent"] and t["origin"] == "controlled_env" for t in on_disk)
+    p1 = [t for t in on_disk if t["phase"] == 1]
+    assert [t["phase"] for t in on_disk] == [1] * len(p1) + [2] * (25 - len(p1))  # phase 1 strictly first
+    for t in on_disk:
+        assert t["steps"] == [t["lower_agent"], "verifier"] and t["lower_agent"] in ("planner", "coder")
+        if t["phase"] == 1:
+            assert t["views"][1] == "current"
+        elif t["topic"] == "deps":
+            assert t["views"] == ["current", "mirror"]
+        else:
+            assert t["views"] == ["stale", "current"]
+    # stress and pilot/full tasks share nothing but the claim bank
+    assert not {t["task_id"] for t in on_disk} & {t["task_id"] for t in d_env.load_tasks("pilot")}
+
+
+def test_mirror_view_shows_the_previous_value_and_its_sync_date() -> None:
+    t = next(t for t in d_env.load_tasks("stress") if t["views"] == ["current", "mirror"])
+    doc = d_env.view_document(t, "mirror", 20)
+    assert d_env.check("deps", doc["text"], t["claim_key"]) == t["timeline"][0]["value"] != t["truth"]
+    assert "last synced " + d_env._stamp(t["mirror_frozen_day"], 0) in doc["text"]
+    assert "stale" not in doc["title"] and "out of date" not in doc["text"]
+
+
+def test_reliability_gives_topic_specific_transitions_on_the_frozen_stream() -> None:
+    """Expected transitions under idealised agents (frozen in docs/BENCHMARK_D_ADAPTIVE_TRUST.md)."""
+    topic = _ideal_trust(per_topic=True)
+    assert _first(topic, lambda x: x["v"] < SCFG["role_prior"]["verifier"]) == 1
+    assert _first(topic, lambda x: x["v"] < x["coder"]) == 3
+    assert _first(topic, lambda x: x["v"] < x["planner"]) == 5
+    assert _first(topic, lambda x: x["v"] < x["low"]) == 3
+    p2 = [x for x in topic if x["t"]["phase"] == 2]
+    assert min(x["v_config"] for x in p2) > 0.95  # the control topic keeps the verifier trusted
+    agent_only = _ideal_trust(per_topic=False)
+    assert _first(agent_only, lambda x: x["v"] < x["coder"]) == 5
+    assert _first(agent_only, lambda x: x["v"] < x["low"]) == 7
+    # without per-topic trust, deps failures leak into config: the verifier falls below the coder there
+    cfg_p2 = [x for x in agent_only if x["t"]["phase"] == 2 and x["t"]["topic"] == "config"]
+    assert min(x["v_config"] for x in cfg_p2) < 0.5
+    assert any(x["v"] < x["low"] for x in cfg_p2)
+
+
+def test_stress_config_is_separate_from_the_primary_benchmark() -> None:
+    assert list(CFG["methods"]) == ["dense", "static", "learned", "learned_evidence"]  # pilot-v2 untouched
+    assert list(SCFG["methods"]) == [*CFG["methods"], "learned_no_topic"]
+    assert SCFG["methods"]["learned_no_topic"]["per_topic"] is False
+    assert SCFG["budget_usd"] == {"stress": 5.0}
+    for k in ("models", "retrieval_pinned", "role_prior", "prior_strength", "retention", "topic_threshold", "top_k"):
+        assert SCFG[k] == CFG[k]
+    assert d_run.runs_for("stress") == d_env.STRESS_DIR / "runs" != d_run.RUNS
+
+
+@pytest.fixture(scope="module")
+def stress_run(tmp_path_factory):
+    runs = tmp_path_factory.mktemp("stress_runs")
+    tasks = d_env.load_tasks("stress")
+    d_run.generate("stress", "gpt-6-luna", "mock-stress", mock=True, cfg=SCFG, runs_dir=runs, tasks=tasks)
+    return runs, tasks
+
+
+def test_stress_agents_are_independent_and_capped_at_five_dollars(stress_run) -> None:
+    runs, _ = stress_run
+    prompts = d_run._jsonl(runs / "mock-stress" / "prompts.jsonl")
+    assert prompts and all(p["messages"][1]["content"].endswith("Team notes so far (oldest first):\n(none)") for p in prompts)
+    capped = {**SCFG, "budget_usd": {"stress": 1e-9}}
+    with pytest.raises(d_agents.BudgetExceeded):  # the stress cap comes from the stress block
+        d_run.generate("stress", "grok-4.7", "capped", client=FakeAPI("xai", "grok-4.7"), cfg=capped, runs_dir=runs,
+                       tasks=d_env.load_tasks("stress"))
+
+
+def test_stress_evaluation_separates_trust_changes_from_ranking_changes(stress_run) -> None:
+    runs, tasks = stress_run
+    summary = d_run.evaluate("mock-stress", runs_dir=runs, cfg=SCFG, split="stress", tasks=tasks)
+    a = summary["stress"]["gpt-6-luna"]
+    learned, agent_only = a["transitions"]["learned"], a["transitions"]["learned_no_topic"]
+    # the mock agent reads its document, so it behaves like the idealised agents above
+    assert a["verifier_wrong_deps_checks_total"] == 12
+    assert learned["trust_swap_vs_coder"]["incorrect_verifier_checks_before"] == 3
+    assert learned["trust_swap_vs_planner"]["incorrect_verifier_checks_before"] == 5
+    assert agent_only["trust_swap_vs_task_lower_agent"]["incorrect_verifier_checks_before"] == 7
+    assert "ranking_first_top1_role_differs_from_static" in learned  # measured separately from trust
+    assert set(a["ranking_changed_vs_static_top1"]) == {"learned", "learned_evidence", "learned_no_topic"}
+    assert a["topic_control"]["learned"]["min_verifier_config_trust_phase2"] > 0.95
+    rows = d_run._jsonl(runs / "mock-stress" / "eval-v1" / "gpt-6-luna" / "scores.jsonl")
+    assert {r["method"] for r in rows} == set(SCFG["methods"]) and len(rows) == 5 * len(tasks)
+    assert "Adaptive-trust stress analysis" in (runs / "mock-stress" / "eval-v1" / "report.md").read_text()
+    assert (runs / "mock-stress" / "SHA256SUMS").exists()
