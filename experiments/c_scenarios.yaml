@@ -1,0 +1,125 @@
+# Benchmark C: scenario definitions. `python -m experiments.trust_run tasks` expands these
+# (with the seeds in c_params.yaml) into experiments/c_tasks.jsonl, which is committed and
+# is the only thing the harness reads. Notes are scripted; no LLM is involved.
+#
+# Each task is one claim (one claim_key) that agents write about in a fresh task scope.
+# writers, in write order:
+#   accuracy: P(writer states the true value); otherwise it states the task's wrong value.
+#             A number, {topic: p}, or {phases: [[from_task_index, p], ...]}.
+#   value:    a fixed label instead: truth | wrong | old | older.
+#   minutes:  write time inside the task (default 10 * position).
+#   repeat:   write the same note this many times, 10 minutes apart.
+#   valid_for: minutes until the note expires (sets Memory.valid_until).
+# exclusive: exactly one of these agents states the truth, chosen at random; the other is wrong.
+# evidence_before: external verification events that exist before the query (round 1).
+# verify_after:    external sources that report the true value after the task is scored;
+#                  this is the only way reliability can learn.
+
+note_template: "Note from the {agent}: {sentence}."
+query_minutes: 90
+
+claims:
+  api:
+    - {key: api.rate_limit, query: "What is the public API rate limit?", sentence: "the public API rate limit is {v} requests per minute", values: ["300", "1000", "600"]}
+    - {key: api.version, query: "Which API version do clients call?", sentence: "clients call API version {v}", values: ["v2", "v3", "v4"]}
+    - {key: api.timeout, query: "What is the API request timeout?", sentence: "the API request timeout is {v} seconds", values: ["10", "30", "60"]}
+    - {key: api.auth, query: "How do clients authenticate to the API?", sentence: "clients authenticate with {v}", values: ["OAuth client credentials", "static API keys", "mTLS certificates"]}
+  db:
+    - {key: db.engine, query: "Which database engine does the service use?", sentence: "the service runs on {v}", values: ["PostgreSQL 16", "MySQL 8", "CockroachDB"]}
+    - {key: db.pool_size, query: "What is the database connection pool size?", sentence: "the database connection pool size is {v}", values: ["20", "50", "100"]}
+    - {key: db.backup_hour, query: "When does the nightly database backup run?", sentence: "the nightly database backup runs at {v} UTC", values: ["01:00", "03:00", "05:00"]}
+    - {key: db.region, query: "Which region hosts the primary database?", sentence: "the primary database lives in {v}", values: ["eu-west-1", "us-east-1", "eu-central-1"]}
+  infra:
+    - {key: infra.deploy_day, query: "Which day are production deploys allowed?", sentence: "production deploys are allowed on {v}", values: ["Tuesday", "Wednesday", "Friday"]}
+    - {key: infra.node_type, query: "Which instance type do the workers run on?", sentence: "the workers run on {v} instances", values: ["c7g.large", "m7i.xlarge", "r7g.large"]}
+    - {key: infra.queue, query: "Which message queue do the services use?", sentence: "the services talk through {v}", values: ["RabbitMQ", "SQS", "Kafka"]}
+    - {key: infra.ci_runner, query: "Which CI runner image builds the service?", sentence: "CI builds on the {v} runner image", values: ["ubuntu-24.04", "ubuntu-22.04", "debian-12"]}
+
+scenarios:
+  - id: s01_wrong_verifier
+    title: A verifier that is consistently wrong
+    tasks: 10
+    topics: [api]
+    writers: [{agent: planner, accuracy: 1.0}, {agent: coder, accuracy: 0.7}, {agent: verifier, accuracy: 0.2}]
+    verify_after: [test]
+
+  - id: s02_reliable_then_unreliable
+    title: A normally reliable agent that suddenly becomes unreliable (from task 6)
+    tasks: 12
+    topics: [api]
+    writers: [{agent: planner, accuracy: 1.0}, {agent: verifier, accuracy: {phases: [[0, 1.0], [6, 0.0]]}}]
+    verify_after: [test]
+
+  - id: s03_topic_dependent
+    title: Correctness varies by topic (coder right on db, wrong on infra; planner the reverse)
+    tasks: 12
+    topics: [db, infra]
+    writers: [{agent: planner, accuracy: {db: 0.0, infra: 1.0}}, {agent: coder, accuracy: {db: 1.0, infra: 0.0}}]
+    verify_after: [test]
+
+  - id: s04_similar_reliability
+    title: Two agents with similar reliability disagree, no evidence
+    tasks: 10
+    topics: [db]
+    priors: {coder_a: 0.70, coder_b: 0.72}
+    writers: [{agent: coder_a}, {agent: coder_b}]
+    exclusive: [coder_a, coder_b]
+    verify_after: []
+
+  - id: s05_low_trust_verified
+    title: A low-trust agent that is repeatedly verified correct
+    tasks: 10
+    topics: [infra]
+    writers: [{agent: planner, accuracy: 1.0}, {agent: coder, accuracy: 0.5}, {agent: verifier, accuracy: 0.5}]
+    verify_after: [test]
+
+  - id: s06_outdated_with_expiry
+    title: A previously correct note becomes outdated; it carries an expiry
+    tasks: 10
+    topics: [infra]
+    writers: [{agent: verifier, value: old, minutes: 0, valid_for: 30}, {agent: planner, value: truth, minutes: 60}]
+    verify_after: [config]
+
+  - id: s06b_outdated_no_expiry
+    title: The same, without an expiry (expected failure case)
+    tasks: 10
+    topics: [infra]
+    writers: [{agent: verifier, value: old, minutes: 0}, {agent: planner, value: truth, minutes: 60}]
+    verify_after: [config]
+
+  - id: s07_successive_corrections
+    title: Several successive corrections by the same agent
+    tasks: 10
+    topics: [api]
+    writers: [{agent: verifier, value: older, minutes: 0}, {agent: coder, value: older, minutes: 5}, {agent: verifier, value: old, minutes: 10}, {agent: verifier, value: truth, minutes: 20}]
+    verify_after: [test]
+
+  - id: s08_self_reinforcement
+    title: An agent repeats its own wrong claim five times
+    tasks: 10
+    topics: [db]
+    writers: [{agent: coder, value: wrong, minutes: 0, repeat: 5}, {agent: planner, value: truth, minutes: 5}]
+    verify_after: [test]
+
+  - id: s09_no_evidence
+    title: Scenario 1 with no verification at all (negative control)
+    tasks: 10
+    topics: [api]
+    writers: [{agent: planner, accuracy: 1.0}, {agent: coder, accuracy: 0.7}, {agent: verifier, accuracy: 0.2}]
+    verify_after: []
+
+  - id: s10_conflicting_sources
+    title: Two independent sources disagree before the query
+    tasks: 10
+    topics: [db]
+    writers: [{agent: planner, value: truth}, {agent: verifier, value: wrong}]
+    evidence_before: [{source: test, value: truth}, {source: config, value: wrong}]
+    verify_after: []
+
+  - id: s11_evidence_for_lower_trust
+    title: Agents disagree and only the lower-trust agent's claim has external evidence
+    tasks: 10
+    topics: [api]
+    writers: [{agent: planner, value: truth}, {agent: verifier, value: wrong}]
+    evidence_before: [{source: test, value: truth}]
+    verify_after: []

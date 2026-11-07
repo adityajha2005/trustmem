@@ -1,0 +1,17 @@
+# Benchmark C: parameters, frozen before any run (approved 2026-11-07).
+# Changing anything here after results exist invalidates the predictions in
+# c_predictions.yaml; a sensitivity sweep, if any, is reported separately.
+
+role_prior:          # starting trust, the static values used by Benchmarks A and B
+  planner: 0.60
+  coder: 0.70
+  verifier: 0.95
+
+prior_strength: 4      # n0: the role prior counts as 4 verified outcomes
+retention: 0.90        # lambda: share of accumulated verification evidence kept per new verification
+topic_threshold: 3     # m: outcomes on a topic before topic trust is used fully (blend below that)
+contested_margin: 0.05 # delta: competing values whose best trust differs by less are flagged contested
+ewma_rate: 0.30        # EWMA baseline: weight of the newest outcome
+
+burn_in: 3             # tasks per episode excluded from "after burn-in" scores
+seeds: [0, 1, 2, 3, 4]

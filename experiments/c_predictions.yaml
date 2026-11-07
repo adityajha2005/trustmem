@@ -1,0 +1,98 @@
+# Benchmark C predictions, written and committed before any method code or run.
+# The harness checks each one and reports HIT or MISS; misses are reported, not tuned away.
+#
+# Metrics (pooled over the 5 seeds):
+#   correct_after_burn_in   share of tasks with index >= burn_in whose top-1 note states the truth
+#   correct_from_index_N    the same, over tasks with index >= N
+#   contested_rate          share of tasks where retrieval flagged the claim as contested
+#   same_as: <condition>    top-1 outcome identical to that condition on every task
+# Ranges are inclusive [low, high]. Conditions without an entry have no prediction
+# (dense and dense_rerank are references only: with scripted, near-identical wording their
+# order is decided by small embedding differences).
+#
+# Hand calculations behind the numbers are in docs/BENCHMARK_C.md.
+
+global:
+  # Cold start: with no verification history, every adaptive variant must behave exactly
+  # like static trust on the first task of every episode.
+  cold_start_same_as_static: [adaptive, adaptive_no_topic, adaptive_no_decay, ewma]
+
+scenarios:
+  s01_wrong_verifier:
+    static: {correct_after_burn_in: [0.0, 0.4]}
+    adaptive: {correct_after_burn_in: [0.8, 1.0]}
+    adaptive_no_topic: {correct_after_burn_in: [0.8, 1.0]}
+    adaptive_no_decay: {correct_after_burn_in: [0.8, 1.0]}
+    ewma: {correct_after_burn_in: [0.8, 1.0]}
+    evidence: {same_as: static}
+    adaptive_evidence: {correct_after_burn_in: [0.8, 1.0]}
+
+  s02_reliable_then_unreliable:   # verifier turns wrong at task 6
+    static: {correct_after_burn_in: [0.25, 0.45]}
+    adaptive: {correct_after_burn_in: [0.65, 1.0], correct_from_index_9: [0.9, 1.0]}
+    adaptive_no_decay: {correct_from_index_9: [0.9, 1.0]}
+    ewma: {correct_from_index_9: [0.9, 1.0]}
+    evidence: {same_as: static}
+
+  s03_topic_dependent:
+    static: {correct_after_burn_in: [0.4, 0.6]}
+    adaptive: {correct_after_burn_in: [0.8, 1.0]}
+    adaptive_no_topic: {correct_after_burn_in: [0.0, 0.6]}   # agent-level trust can't separate topics
+    ewma: {correct_after_burn_in: [0.8, 1.0]}                # EWMA is kept per agent and topic
+
+  s04_similar_reliability:        # 0.70 vs 0.72, no evidence
+    static: {correct_after_burn_in: [0.2, 0.8], contested_rate: [0.0, 0.0]}
+    adaptive: {same_as: static}
+    evidence: {contested_rate: [0.9, 1.0]}
+    adaptive_evidence: {contested_rate: [0.9, 1.0]}
+
+  s05_low_trust_verified:
+    static: {correct_after_burn_in: [0.3, 0.7]}
+    adaptive: {correct_after_burn_in: [0.8, 1.0]}
+    ewma: {correct_after_burn_in: [0.8, 1.0]}
+
+  s06_outdated_with_expiry:
+    static: {correct_after_burn_in: [0.0, 0.1]}
+    adaptive: {correct_after_burn_in: [0.0, 0.1]}   # expired claims are not judged, so the verifier keeps 0.95
+    evidence: {correct_after_burn_in: [0.9, 1.0]}
+    adaptive_evidence: {correct_after_burn_in: [0.9, 1.0]}
+
+  s06b_outdated_no_expiry:
+    static: {correct_after_burn_in: [0.0, 0.1]}
+    # Expected to "succeed for the wrong reason": the verifier is penalised for a fact that
+    # changed after it wrote it, not for being wrong. Reported as a failure mode.
+    adaptive: {correct_after_burn_in: [0.8, 1.0]}
+    evidence: {same_as: static}
+
+  s07_successive_corrections:
+    static: {correct_after_burn_in: [0.1, 0.6]}
+    adaptive: {correct_after_burn_in: [0.1, 0.6]}
+    evidence: {correct_after_burn_in: [0.9, 1.0]}
+    adaptive_evidence: {correct_after_burn_in: [0.9, 1.0]}
+
+  s08_self_reinforcement:
+    static: {correct_after_burn_in: [0.0, 0.1]}
+    adaptive: {correct_after_burn_in: [0.8, 1.0]}
+    ewma: {correct_after_burn_in: [0.8, 1.0]}
+    evidence: {correct_after_burn_in: [0.0, 0.1]}   # repeats collapse, but the coder still outranks the planner
+    adaptive_evidence: {correct_after_burn_in: [0.8, 1.0]}
+
+  s09_no_evidence:                # negative control
+    static: {correct_after_burn_in: [0.0, 0.4]}
+    adaptive: {same_as: static}
+    adaptive_no_topic: {same_as: static}
+    adaptive_no_decay: {same_as: static}
+    ewma: {same_as: static}
+    evidence: {same_as: static}
+    adaptive_evidence: {same_as: static}
+
+  s10_conflicting_sources:
+    static: {contested_rate: [0.0, 0.0]}
+    evidence: {contested_rate: [0.9, 1.0]}
+    adaptive_evidence: {contested_rate: [0.9, 1.0]}
+
+  s11_evidence_for_lower_trust:
+    static: {correct_after_burn_in: [0.0, 0.1]}
+    adaptive: {same_as: static}
+    evidence: {correct_after_burn_in: [0.9, 1.0]}
+    adaptive_evidence: {correct_after_burn_in: [0.9, 1.0]}
