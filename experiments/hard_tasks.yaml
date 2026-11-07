@@ -1,0 +1,426 @@
+# Benchmark B: harder scenarios, kept separate from the 40 tasks in real_run_tasks.yaml.
+#
+# Every task fixes the correct answer up front (`expected`, a key into `facts`)
+# before any model runs. Agents write notes in their own words from `writes`, in
+# order; each note is labelled with the fact it was generated from, so scoring
+# never asks an LLM which note is right.
+#
+#   category : multi_version | ambiguous | conflicting | wrong_verifier
+#   facts    : id -> fact text
+#   writes   : [{role, fact, kind}]  role is planner (0.60) / coder (0.70) / verifier (0.95)
+#              kind is the prompt template in experiments/hard_run.py:
+#                belief    the agent's current understanding
+#                build     builds on the previous write's note
+#                correct   verified against the source of truth, names the earlier fact
+#                implicit  states the fact with no reference to what came before
+#                decide    a new decision made after the earlier notes
+#                dispute   disagrees with the previous write's note
+#   expected : the fact that is actually true when the query is asked
+#   why      : one line for human reviewers, never shown to the agents
+tasks:
+  # -- multi_version: several successive updates; the newest is true ----------
+  - id: mv_deploy_day
+    category: multi_version
+    context: A team is shipping v2 of a billing service.
+    facts:
+      v1: Production deploys happen Fridays at 14:00 UTC.
+      v2: Production deploys moved to Wednesdays at 09:00 UTC.
+      v3: Production deploys moved again, to Tuesdays at 10:00 UTC.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: coder, fact: v1, kind: build}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: verifier, fact: v3, kind: correct}
+    expected: v3
+    why: The verifier corrected twice; the later correction wins.
+    query: When do production deploys happen?
+  - id: mv_rate_limit
+    category: multi_version
+    context: A public REST API is preparing for a launch.
+    facts:
+      v1: The public API rate limit is 1000 requests per minute per key.
+      v2: Infra lowered the public API limit to 300 requests per minute per key.
+      v3: After load tests, infra set the public API limit to 500 requests per minute per key.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: coder, fact: v1, kind: build}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: verifier, fact: v3, kind: correct}
+    expected: v3
+    why: Two verified changes; the newer one is current.
+    query: What is the public API rate limit per key?
+  - id: mv_python
+    category: multi_version
+    context: A data team is containerizing its ETL jobs.
+    facts:
+      v1: The ETL images use Python 3.10.
+      v2: The ETL images were upgraded to Python 3.11.
+      v3: The ETL images are now on Python 3.12.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: coder, fact: v2, kind: build}
+      - {role: verifier, fact: v3, kind: correct}
+    expected: v3
+    why: Three versions; the last verified one is current.
+    query: Which Python version do the ETL images use?
+  - id: mv_retention
+    category: multi_version
+    context: A logging platform is setting data retention for compliance.
+    facts:
+      v1: Application logs are kept for 30 days.
+      v2: Legal raised application log retention to 90 days.
+      v3: Legal settled on 180 days of application log retention.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: coder, fact: v1, kind: build}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: verifier, fact: v3, kind: correct}
+    expected: v3
+    why: The second verified change replaces the first.
+    query: How long are application logs kept?
+  - id: mv_db_after_verify
+    category: multi_version
+    context: A startup is building an analytics dashboard.
+    facts:
+      v1: Event data will be stored in MongoDB.
+      v2: The CTO decided event data goes into ClickHouse instead of MongoDB.
+      v3: After a cost review, the team decided event data goes into PostgreSQL with TimescaleDB.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: coder, fact: v1, kind: build}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: planner, fact: v3, kind: decide}
+    expected: v3
+    why: A newer decision by a lower-trust agent replaces a verified fact.
+    query: Which database stores the event data?
+  - id: mv_region_after_verify
+    category: multi_version
+    context: A SaaS company is choosing where to host EU customer data.
+    facts:
+      v1: EU customer data is hosted in eu-west-1 (Ireland).
+      v2: EU customer data is hosted in eu-central-1 (Frankfurt).
+      v3: The team decided to move EU customer data to eu-north-1 (Stockholm) for cheaper capacity.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: coder, fact: v2, kind: build}
+      - {role: planner, fact: v3, kind: decide}
+    expected: v3
+    why: The planner's later decision replaces the verified region.
+    query: Which AWS region hosts EU customer data?
+  - id: mv_queue_after_verify
+    category: multi_version
+    context: A backend team is adding background jobs to a web app.
+    facts:
+      v1: Background jobs run on Celery with Redis as the broker.
+      v2: Background jobs run on Celery with RabbitMQ as the broker.
+      v3: The team decided to drop Celery and run background jobs on Dramatiq with Redis.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: coder, fact: v1, kind: build}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: coder, fact: v3, kind: decide}
+    expected: v3
+    why: The coder's later decision replaces the verified broker.
+    query: What runs the background jobs, and with which broker?
+  - id: mv_timeout_after_verify
+    category: multi_version
+    context: A payments service is tuning calls to its card processor.
+    facts:
+      v1: Calls to the card processor time out after 30 seconds.
+      v2: Calls to the card processor time out after 10 seconds.
+      v3: The team decided to cut the card processor timeout to 5 seconds after an incident.
+    writes:
+      - {role: planner, fact: v1, kind: belief}
+      - {role: coder, fact: v1, kind: build}
+      - {role: verifier, fact: v2, kind: correct}
+      - {role: planner, fact: v3, kind: decide}
+    expected: v3
+    why: A post-incident decision replaces the verified timeout.
+    query: What is the timeout for card processor calls?
+
+  # -- ambiguous: the update never says it replaces the old note --------------
+  - id: amb_auth
+    category: ambiguous
+    context: A mobile app backend is adding login for a partner integration.
+    facts:
+      old: Partner clients authenticate with long-lived JWTs signed by our service.
+      new: Partner clients authenticate with OAuth 2.0 client credentials.
+    writes:
+      - {role: planner, fact: old, kind: belief}
+      - {role: coder, fact: old, kind: build}
+      - {role: verifier, fact: new, kind: implicit}
+    expected: new
+    why: The verifier states the current method without mentioning JWTs.
+    query: How do partner clients authenticate?
+  - id: amb_cache
+    category: ambiguous
+    context: A news site is speeding up its article pages.
+    facts:
+      old: Article pages are cached in Varnish for 10 minutes.
+      new: Article pages are cached at the CDN edge for 60 seconds.
+    writes:
+      - {role: planner, fact: old, kind: belief}
+      - {role: coder, fact: old, kind: build}
+      - {role: verifier, fact: new, kind: implicit}
+    expected: new
+    why: The newer note describes the current cache without referring to Varnish.
+    query: How are article pages cached, and for how long?
+  - id: amb_ci
+    category: ambiguous
+    context: An open source library is setting up continuous integration.
+    facts:
+      old: CI runs on Travis CI.
+      new: CI runs on GitHub Actions.
+    writes:
+      - {role: planner, fact: old, kind: belief}
+      - {role: coder, fact: old, kind: build}
+      - {role: verifier, fact: new, kind: implicit}
+    expected: new
+    why: The move to GitHub Actions is stated as plain fact.
+    query: Which CI service runs the tests?
+  - id: amb_owner
+    category: ambiguous
+    context: A company is assigning on-call ownership for its search service.
+    facts:
+      old: The search service is owned by the platform team.
+      new: The discovery team is on call for the search service.
+    writes:
+      - {role: planner, fact: old, kind: belief}
+      - {role: coder, fact: old, kind: build}
+      - {role: verifier, fact: new, kind: implicit}
+    expected: new
+    why: Ownership changed; the new note uses different words ("on call").
+    query: Which team owns the search service?
+  - id: amb_payment_provider
+    category: ambiguous
+    context: An online shop is integrating card payments.
+    facts:
+      old: Card payments go through Stripe.
+      new: Card payments go through Adyen.
+    writes:
+      - {role: planner, fact: old, kind: belief}
+      - {role: coder, fact: old, kind: build}
+      - {role: coder, fact: new, kind: implicit}
+    expected: new
+    why: The coder's later note states the new provider without referring back.
+    query: Which provider processes card payments?
+  - id: amb_font
+    category: ambiguous
+    context: A design team is updating the web app's look.
+    facts:
+      old: The web app uses Inter as its main font.
+      new: The web app uses IBM Plex Sans as its main font.
+    writes:
+      - {role: planner, fact: old, kind: belief}
+      - {role: coder, fact: old, kind: build}
+      - {role: coder, fact: new, kind: implicit}
+    expected: new
+    why: Same agent, later note, no reference to the earlier font.
+    query: What is the web app's main font?
+  - id: amb_batch_size
+    category: ambiguous
+    context: An ML team is training a recommendation model.
+    facts:
+      old: The model trains with a batch size of 256.
+      new: The model trains with a batch size of 1024 on the new GPUs.
+    writes:
+      - {role: planner, fact: old, kind: belief}
+      - {role: coder, fact: old, kind: build}
+      - {role: coder, fact: new, kind: implicit}
+    expected: new
+    why: The later note states the current batch size without saying it changed.
+    query: What batch size does the model train with?
+
+  # -- conflicting: two agents disagree, nobody resolves it -------------------
+  - id: conf_port
+    category: conflicting
+    context: A team is deploying an internal metrics service.
+    facts:
+      a: The metrics service listens on port 9090.
+      b: The metrics service listens on port 9100.
+    writes:
+      - {role: planner, fact: a, kind: belief}
+      - {role: coder, fact: b, kind: dispute}
+    expected: b
+    why: The coder read the service config; the higher-trust agent is right.
+    query: Which port does the metrics service listen on?
+  - id: conf_orm
+    category: conflicting
+    context: A Python web team is building a new admin backend.
+    facts:
+      a: The admin backend uses SQLAlchemy 1.4.
+      b: The admin backend uses SQLAlchemy 2.0.
+    writes:
+      - {role: planner, fact: a, kind: belief}
+      - {role: coder, fact: b, kind: dispute}
+    expected: b
+    why: The coder checked the lockfile; the higher-trust agent is right.
+    query: Which SQLAlchemy version does the admin backend use?
+  - id: conf_backup
+    category: conflicting
+    context: An infra team is documenting database backups.
+    facts:
+      a: Database backups run every 6 hours.
+      b: Database backups run once a day at 02:00 UTC.
+    writes:
+      - {role: planner, fact: a, kind: belief}
+      - {role: coder, fact: b, kind: dispute}
+    expected: b
+    why: The coder read the cron schedule; the higher-trust agent is right.
+    query: How often do database backups run?
+  - id: conf_max_upload
+    category: conflicting
+    context: A file sharing app is setting upload limits.
+    facts:
+      a: The maximum upload size is 100 MB.
+      b: The maximum upload size is 25 MB.
+    writes:
+      - {role: planner, fact: a, kind: belief}
+      - {role: coder, fact: b, kind: dispute}
+    expected: b
+    why: The coder checked the server setting; the higher-trust agent is right.
+    query: What is the maximum upload size?
+  - id: conf_locale
+    category: conflicting
+    context: A booking app is launching in a new market.
+    facts:
+      a: The app launches in Germany first.
+      b: The app launches in Austria first.
+    writes:
+      - {role: planner, fact: a, kind: belief}
+      - {role: coder, fact: b, kind: dispute}
+    expected: a
+    why: Launch markets are the planner's call; the coder misread an old ticket. The lower-trust agent is right.
+    query: Which country does the app launch in first?
+  - id: conf_pricing
+    category: conflicting
+    context: A SaaS product is finalizing its pricing page.
+    facts:
+      a: The Pro plan costs 29 euros per month.
+      b: The Pro plan costs 39 euros per month.
+    writes:
+      - {role: planner, fact: a, kind: belief}
+      - {role: coder, fact: b, kind: dispute}
+    expected: a
+    why: Pricing was set by the planner; the coder copied a draft value. The lower-trust agent is right.
+    query: How much does the Pro plan cost?
+  - id: conf_deadline
+    category: conflicting
+    context: A team is planning a feature release.
+    facts:
+      a: The feature freeze is on March 3.
+      b: The feature freeze is on March 10.
+    writes:
+      - {role: planner, fact: a, kind: belief}
+      - {role: coder, fact: b, kind: dispute}
+    expected: a
+    why: The planner owns the schedule; the coder remembered an old date. The lower-trust agent is right.
+    query: When is the feature freeze?
+
+  # -- wrong_verifier: the verifier is confident and wrong --------------------
+  - id: wv_rate_limit
+    category: wrong_verifier
+    context: A public REST API is preparing for a launch.
+    facts:
+      right: The production API rate limit is 1000 requests per minute per key.
+      wrong: The production API rate limit is 300 requests per minute per key.
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier checked the staging config, not production.
+    query: What is the production API rate limit per key?
+  - id: wv_deploy
+    category: wrong_verifier
+    context: A team is shipping v2 of a billing service.
+    facts:
+      right: Production deploys happen Fridays at 14:00 UTC.
+      wrong: Production deploys happen Wednesdays at 09:00 UTC.
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier read last quarter's release calendar.
+    query: When do production deploys happen?
+  - id: wv_tls
+    category: wrong_verifier
+    context: A security team is hardening a public load balancer.
+    facts:
+      right: The load balancer accepts TLS 1.2 and 1.3.
+      wrong: The load balancer accepts only TLS 1.3.
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier tested a different listener that is TLS 1.3 only.
+    query: Which TLS versions does the load balancer accept?
+  - id: wv_db_version
+    category: wrong_verifier
+    context: A team is planning a database upgrade.
+    facts:
+      right: The production database runs PostgreSQL 15.
+      wrong: The production database runs PostgreSQL 16.
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier checked the upgraded replica, not the primary.
+    query: Which PostgreSQL version does the production database run?
+  - id: wv_sla
+    category: wrong_verifier
+    context: A cloud product is writing its customer contract.
+    facts:
+      right: The uptime SLA is 99.9 percent.
+      wrong: The uptime SLA is 99.99 percent.
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier read the enterprise tier's SLA.
+    query: What is the uptime SLA?
+  - id: wv_token_ttl
+    category: wrong_verifier
+    context: An auth service is configuring session tokens.
+    facts:
+      right: Access tokens expire after 15 minutes.
+      wrong: Access tokens expire after 60 minutes.
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier looked at the refresh token setting by mistake.
+    query: How long until an access token expires?
+  - id: wv_region
+    category: wrong_verifier
+    context: A SaaS company is documenting where EU customer data lives.
+    facts:
+      right: EU customer data is hosted in eu-central-1 (Frankfurt).
+      wrong: EU customer data is hosted in eu-west-1 (Ireland).
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier checked the disaster-recovery copy.
+    query: Which AWS region hosts EU customer data?
+  - id: wv_python
+    category: wrong_verifier
+    context: A data team is containerizing its ETL jobs.
+    facts:
+      right: The ETL images use Python 3.12.
+      wrong: The ETL images use Python 3.11.
+    writes:
+      - {role: planner, fact: right, kind: belief}
+      - {role: coder, fact: right, kind: build}
+      - {role: verifier, fact: wrong, kind: correct}
+    expected: right
+    why: The verifier inspected a cached old image.
+    query: Which Python version do the ETL images use?
