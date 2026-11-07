@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 from storage.database import get_engine
@@ -39,8 +40,27 @@ def init_db(config: AppConfig | None = None, *, engine: Engine | None = None) ->
 
     db_engine = engine or get_engine(cfg)
     Base.metadata.create_all(bind=db_engine)
+    _add_missing_columns(db_engine)
     logger.info("Initialized memory database at %s", cfg.database_url)
     return db_engine
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """Add nullable columns introduced after a database was created (create_all won't).
+
+    ponytail: additive ALTERs only; switch to Alembic if a column ever needs changing.
+    """
+    insp = inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        if not insp.has_table(table.name):
+            continue
+        present = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name not in present and col.nullable:
+                ddl = f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type.compile(engine.dialect)}"
+                with engine.begin() as conn:
+                    conn.execute(text(ddl))
+                logger.info("Added column %s.%s", table.name, col.name)
 
 
 def reset_db(config: AppConfig | None = None, *, engine: Engine | None = None) -> Engine:

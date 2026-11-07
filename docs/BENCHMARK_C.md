@@ -92,3 +92,72 @@ Using n₀ = 4 and λ = 0.9:
   - Agent-level trust only sees two agents who are each right half the time, and their last outcomes alternate with the topic. That's why it's predicted at or below static.
 - **Scenario 6 (with expiry).** The verifier's expired note is never judged, so the verifier stays at 0.95. The planner tops out near 12.4 / 14 ≈ 0.89. Adaptive trust alone stays stale, and only expiry fixes it.
 - **Scenario 6b (no expiry).** The verifier's latest claim is the old value, so it is judged wrong after the world changed. Adaptive trust "wins", but by penalising an agent that wasn't wrong when it wrote the note. This is a predicted failure mode, not a success.
+
+## Process record
+
+| Commit | What |
+|---|---|
+| `baseline-static-trust` (tag, `a65c9a7`) | Code that produced Benchmarks A and B |
+| `e5245bd` | A and B recorded runs frozen in `results/historical/`, with a re-scoring regression test |
+| `a490ca8` | This design: parameters, scenarios, 620 tasks, predictions. No method code existed yet |
+| `aaa83a4` | Reliability, evidence, trust seam, harness, unit tests |
+| `d822e58` | Results of the real-model run (`results/benchmark_c/`) |
+
+Before the method commit, I ran the harness once offline with hash embeddings as a smoke test. That run changed one thing: the prediction checker crashed on a scenario subset, so it now skips scenarios that have no rows. The method, the parameters, the tasks and the predictions were not changed after any result was seen. The offline and real runs give the same top-1 outcomes for every trust condition, because the pinned top note is chosen by trust, not by the embeddings.
+
+## Reproducing
+
+```bash
+python -m experiments.trust_run tasks   # regenerates c_tasks.jsonl; must be byte-identical (tested)
+python -m experiments.trust_run run     # about 5 minutes on CPU with BGE + MiniLM cached
+pytest tests/test_trust_run.py tests/test_reliability_evidence.py   # offline, hash embeddings
+TRUSTMEM_REAL_MODELS=1 pytest tests/test_historical_results.py      # A and B still re-score identically
+```
+
+`results/benchmark_c/manifest.json` records the commit, the Python version, the models, and SHA-256 hashes of the four input files. There are no LLM calls and no API cost.
+
+## Results (real run, `d822e58`)
+
+Correct top-1 after the 3-task burn-in, pooled over 5 seeds (35 to 45 tasks per cell). Tasks within an episode share trust state, so they are not independent. These are exploratory patterns, not significance tests.
+
+| Scenario | dense | +rerank | static | adaptive | no topic | EWMA | evidence | adaptive + evidence |
+|---|---|---|---|---|---|---|---|---|
+| 1 wrong verifier | 0.71 | 0.54 | 0.14 | 0.94 | 0.94 | 0.94 | 0.14 | 0.94 |
+| 2 reliable, then unreliable | 0.62 | 0.78 | 0.33 | 0.78 | 0.78 | 0.89 | 0.33 | 0.78 |
+| 3 reliability varies by topic | 0.49 | 0.51 | 0.44 | 0.89 | 0.44 | 1.00 | 0.44 | 0.89 |
+| 4 similar reliability (contested flag) | 0.40 | 0.46 | 0.43 | 0.43 | 0.43 | 0.43 | 0.43 (flag 1.00) | 0.43 (flag 1.00) |
+| 5 low-trust agent verified right | 0.60 | 0.77 | 0.43 | 0.89 | 0.89 | 0.97 | 0.43 | 0.89 |
+| 6 outdated, with expiry | 0.57 | 0.54 | 0.00 | 0.00 | 0.00 | 0.57 | 0.54 | 0.54 |
+| 6b outdated, no expiry | 0.49 | 0.54 | 0.00 | 1.00 | 1.00 | 1.00 | 0.00 | 1.00 |
+| 7 successive corrections | 0.03 | 0.37 | 0.31 | 0.31 | 0.31 | 0.31 | 1.00 | 1.00 |
+| 8 self-reinforcement | 0.26 | 0.77 | 0.00 | 1.00 | 1.00 | 1.00 | 0.00 | 1.00 |
+| 9 no evidence (control) | 0.66 | 0.77 | 0.26 | 0.26 | 0.26 | 0.26 | 0.26 | 0.26 |
+| 10 conflicting sources (contested flag) | 0.14 | 0.60 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 (flag 1.00) | 0.00 (flag 1.00) |
+| 11 evidence for the lower-trust agent | 0.31 | 0.69 | 0.00 | 0.00 | 0.00 | 0.00 | 1.00 | 1.00 |
+
+`adaptive_no_decay` matched `adaptive` in every scenario, so it's left out of this table. The full tables also cover all-task accuracy, stale and wrong-authority rates, inversions, Brier scores, latency and the per-prediction checks, and are in `results/benchmark_c/report.md`.
+
+What the run shows, including where it fails:
+
+- **Learned trust fixes static trust's failure, once verified history exists.** In scenario 1, static trust was right on 0.14 of tasks and learned trust on 0.94. Scenarios 2, 3, 5 and 8 show the same pattern.
+  - The gain depends on three things: verification outcomes from earlier tasks, external sources that are always right in this benchmark, and writers that label `claim_key` and `claim_value` correctly.
+  - Benchmark B has none of these. With no history, learned trust is identical to static trust by construction (the cold-start and scenario 9 checks pass exactly). So B's 0 of 16 is not fixed in B's setting.
+- **Without evidence, trusting the wrong agent is worse than plain search.**
+  - In scenario 9, dense got 0.66 and dense + rerank 0.77, against 0.26 for every trust condition.
+  - In scenario 10, dense + rerank got 0.60 against 0.
+  - Dense retrieval roughly follows the share of notes that are right. A trust prior concentrates on one agent, which is right or wrong as a whole.
+- **EWMA matched or beat the Beta model.** It did so on scenarios 2, 3 and 5, and had a lower Brier score in most scenarios.
+  - Turning off decay changed nothing, because episodes of 10 to 12 tasks are too short for it to matter.
+  - Nothing in this benchmark tests the reason for choosing Beta (a single mistake can only move trust so far). These results don't show that Beta is the better choice.
+- **Evidence and claim groups help where trust can't.**
+  - Scenario 7, successive corrections: 1.00 against 0.31 for static.
+  - Scenario 11, evidence for the lower-trust agent: 1.00 against 0.
+  - Similar reliability (scenario 4) and conflicting sources (scenario 10) are flagged as contested in every task.
+  - Each of these relies on correct `claim_key` and `claim_value` labels, which the LLM agents in A and B never produced.
+- **Two predictions missed. Both are in scenario 6, for the evidence and adaptive + evidence conditions: 0.54 against a predicted 0.9 to 1.0.**
+  - The expired note is dropped correctly.
+  - In all 24 misses, the pin guard then lifts an irrelevant distractor note written by the verifier above the right answer. That's the known pinning flaw, triggered here by how distractors are assigned.
+  - It is reported as a miss and was not fixed and rerun.
+- **Scenario 6b succeeds for the wrong reason, as predicted.** The verifier is penalised for a fact that changed after it wrote its note. Learned trust can't tell "was wrong" from "became outdated" without validity information.
+- **Adaptive + evidence flags 8 to 10% of tasks as contested in scenarios 1, 2 and 5.** That happens when two agents' learned trust passes within 0.05 of each other. These flags weren't predicted.
+- **Cost.** The trust lookup adds about 0.01 ms per query. The latency differences between the trustmem conditions (about 40 to 65 ms, mostly the cross-encoder) are noise.

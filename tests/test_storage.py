@@ -131,3 +131,22 @@ def test_list_by_task(config: AppConfig) -> None:
         store.create(Memory(content="b", agent="a2", scope=MemoryScope.LOCAL, task_id="t2"))
         rows = store.list_by_task("t1")
     assert len(rows) == 1
+
+
+def test_init_db_adds_new_columns_to_an_old_database(tmp_path) -> None:
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:  # the memories table as it was before claim fields
+        conn.execute(
+            "CREATE TABLE memories (id VARCHAR(36) PRIMARY KEY, content TEXT NOT NULL, agent VARCHAR(128) NOT NULL,"
+            " timestamp DATETIME NOT NULL, confidence FLOAT NOT NULL, importance FLOAT NOT NULL, scope VARCHAR(16) NOT NULL,"
+            " task_id VARCHAR(128), memory_type VARCHAR(32) NOT NULL, parent_memory VARCHAR(36), supersedes VARCHAR(36),"
+            " archived BOOLEAN NOT NULL)"
+        )
+    config = AppConfig(database_url=f"sqlite:///{path}")
+    init_db(config)
+    with session_scope(config) as session:
+        store = SQLiteMemoryStore(session)
+        m = store.create(Memory(content="x", agent="a", claim_key="api.limit", claim_value="300"))
+        assert store.get(m.id).claim_value == "300"

@@ -68,6 +68,7 @@ Every memory carries who wrote it, who can see it, how confident the author was,
 | `supersedes`, `parent_memory` | the chain from an old note to the note that replaced it |
 | `archived` | hidden from retrieval unless you ask for it |
 | `task_id`, `memory_type` | candidate pool and filtering |
+| `claim_key`, `claim_value`, `valid_until` | optional: which fact the note is about, the value it claims, and when it expires (Benchmark C) |
 
 `memory/lineage.py` builds the supersession chains and answers "what is the latest version of this". `memory/contradictions.py` keeps a registry of notes that conflict and how each conflict was resolved. Everything is stored in a single SQLite table (WAL mode) with the vectors in FAISS next to it.
 
@@ -129,9 +130,53 @@ When one agent clearly outranks the others and is right, trustmem gets it: 8 of 
 
 The trust numbers in these runs come from roles: verifier 0.95, coder 0.70, planner 0.60. A role says who usually checks facts. It is not evidence that a given note is correct, and Benchmark B shows what happens when the two come apart. In practice you calibrate trust against things you can verify: tests that pass or fail, the production config, a human sign-off.
 
-Future work, not built yet: trust that starts from the role and then moves with each verified outcome, tracked per agent and per topic. A verifier whose notes keep being contradicted by the source of truth would lose rank, and a coder who keeps being right would gain it. trustmem stores `confidence` on every memory, so the retriever doesn't change; what's missing is the loop that updates those numbers.
+Future work when Benchmarks A and B were run, and since built in a first version that [Benchmark C](#benchmark-c-learned-trust-and-evidence) tests: trust that starts from the role and then moves with each verified outcome, tracked per agent and per topic. A verifier whose notes keep being contradicted by the source of truth would lose rank, and a coder who keeps being right would gain it. trustmem stores `confidence` on every memory, so the retriever doesn't change; what's missing is the loop that updates those numbers.
 
 Other limits: 40 tasks per model, written by me, with one clean correction each. Pinning the most trusted note to the top can occasionally pin the wrong note from that agent (it happened once in 120 runs). Below the top spot, an outdated note sometimes still ranks above the correction.
+
+## Benchmark C: learned trust and evidence
+
+Benchmarks A and B use fixed trust per role. Benchmark C tests what this branch adds on top. All of it is optional and off unless you pass it in `RetrievalContext`:
+
+- **Learned reliability** (`memory/reliability.py`). Trust starts at the role prior and moves with verified outcomes, per agent and per topic. Only external checks (a test, a config read, a human) change it. Agents agreeing with each other, an agent repeating itself, and retrieval results never do.
+- **Evidence and claim groups** (`memory/evidence.py`). A note can say which fact it is about (`claim_key`), the value it claims, and when it expires. At stage 4 the retriever:
+  - drops notes refuted by external evidence;
+  - drops expired notes;
+  - drops an agent's older notes on a fact it has written again.
+
+  It also flags a result as contested when the evidence or the trust margin can't separate the competing values.
+
+The benchmark is 12 scripted scenarios run as sequences of tasks. Trust is learned from earlier tasks and scored on later ones. The tasks, frozen parameters and predicted outcomes were committed before any of this code existed. The design, the rules and the full results are in [docs/BENCHMARK_C.md](docs/BENCHMARK_C.md). Correct top-1 after a 3-task burn-in, 5 seeds:
+
+| Scenario | Vector search | + cross-encoder | Static trust | Learned trust | Static trust + evidence | Learned trust + evidence |
+|---|---|---|---|---|---|---|
+| Verifier wrong 80% of the time | 0.71 | 0.54 | 0.14 | 0.94 | 0.14 | 0.94 |
+| Verifier turns unreliable halfway | 0.62 | 0.78 | 0.33 | 0.78 | 0.33 | 0.78 |
+| Reliability depends on the topic | 0.49 | 0.51 | 0.44 | 0.89 | 0.44 | 0.89 |
+| Agent repeats its wrong claim 5 times | 0.26 | 0.77 | 0.00 | 1.00 | 0.00 | 1.00 |
+| Same agent corrects itself twice | 0.03 | 0.37 | 0.31 | 0.31 | 1.00 | 1.00 |
+| Only the lower-trust claim has evidence | 0.31 | 0.69 | 0.00 | 0.00 | 1.00 | 1.00 |
+| No verification at all (control) | 0.66 | 0.77 | 0.26 | 0.26 | 0.26 | 0.26 |
+| Outdated note with an expiry | 0.57 | 0.54 | 0.00 | 0.00 | 0.54 | 0.54 |
+
+The results, read carefully:
+
+- **The 0.94 needs verified history.** It depends on verification outcomes from earlier tasks, external sources that are always right, and agents that label their claims. None of that exists in Benchmark B. There, learned trust behaves exactly like static trust (that equality is one of the predictions, and it holds), so B's 0 of 16 still stands.
+- **Without evidence, a trust prior on the wrong agent is worse than plain search.** See the control row: plain search is right on 0.66 of tasks and trust-aware ranking on 0.26.
+- **The simpler EWMA baseline matched or beat the Beta model.** Nothing here shows the Beta model is the better choice.
+- **The expiry row missed its prediction (0.54 against 0.9 or more).** The expired note is dropped, and then the pin guard lifts an irrelevant note from the verifier above the right answer. That's the pinning flaw listed under "Where it breaks".
+
+What's new on this branch:
+- the reliability module;
+- verification events and their table;
+- the contested flag;
+- Benchmark C.
+
+What extends existing code:
+- the claim-group, expiry and refutation filters, which run inside the existing stage 4 lineage filter;
+- trust, which still enters through the same scoring and fusion weights.
+
+One behaviour change: an agent's own notes no longer get trust 1.0 automatically. Visibility is decided by scope, and authorship no longer implies correctness. Re-scoring the recorded Benchmark A and B runs gives identical results ([results/historical/](results/historical/README.md), `pytest tests/test_historical_results.py`). The tag `baseline-static-trust` marks the code before these changes.
 
 ## Setup
 
