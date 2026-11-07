@@ -164,7 +164,7 @@ The results, read carefully:
 - **The 0.94 needs verified history.** It depends on verification outcomes from earlier tasks, external sources that are always right, and agents that label their claims. None of that exists in Benchmark B. There, learned trust behaves exactly like static trust (that equality is one of the predictions, and it holds), so B's 0 of 16 still stands.
 - **Without evidence, a trust prior on the wrong agent is worse than plain search.** See the control row: plain search is right on 0.66 of tasks and trust-aware ranking on 0.26.
 - **The simpler EWMA baseline matched or beat the Beta model.** Nothing here shows the Beta model is the better choice.
-- **The expiry row missed its prediction (0.54 against 0.9 or more).** The expired note is dropped, and then the pin guard lifts an irrelevant note from the verifier above the right answer. That's the pinning flaw listed under "Where it breaks".
+- **The expiry row missed its prediction (0.54 against 0.9 or more).** The expired note is dropped, and then the pin guard lifts an irrelevant note from the verifier above the right answer. That's the pinning flaw noted in "Other limits" above, made visible here by how distractor notes are assigned.
 
 What's new on this branch:
 - the reliability module;
