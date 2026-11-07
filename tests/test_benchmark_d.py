@@ -392,3 +392,22 @@ def test_stress_evaluation_separates_trust_changes_from_ranking_changes(stress_r
     assert {r["method"] for r in rows} == set(SCFG["methods"]) and len(rows) == 5 * len(tasks)
     assert "Adaptive-trust stress analysis" in (runs / "mock-stress" / "eval-v1" / "report.md").read_text()
     assert (runs / "mock-stress" / "SHA256SUMS").exists()
+
+
+def test_duplicate_records_from_overlapping_runs_are_scored_once(mock_run) -> None:
+    runs, tasks = mock_run
+    md = runs / "mock-run" / "gpt-6-luna"
+    writes, checks = d_run._jsonl(md / "writes.jsonl"), d_run._jsonl(md / "checks.jsonl")
+    w, c, n = d_run.dedupe(writes + writes[:3], checks + checks[:2])
+    assert (w, c, n) == (writes, checks, {"writes_dropped": 3, "checks_dropped": 2})
+
+
+def test_concurrent_generate_on_one_model_dir_is_refused(tmp_path) -> None:
+    import fcntl
+
+    md = tmp_path / "mock-lock" / "gpt-6-luna"
+    md.mkdir(parents=True)
+    held = (md / ".generate.lock").open("w")
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with pytest.raises(SystemExit, match="another generate"):
+        d_run.generate("pilot", "gpt-6-luna", "mock-lock", mock=True, cfg=CFG, runs_dir=tmp_path, tasks=_tasks(1))

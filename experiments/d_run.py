@@ -23,6 +23,7 @@ does the post-query external check update learned trust. Retrieval never updates
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
@@ -108,6 +109,11 @@ def generate(split: str, model_name: str, run_id: str, *, client: d_agents.Clien
     run_dir = runs_dir / run_id
     model_dir = run_dir / model_name
     ledger = d_agents.Ledger.open(run_dir, model_dir, cfg["budget_usd"][split])
+    lock = (model_dir / ".generate.lock").open("w")
+    try:  # two generate processes on one model dir would record tasks twice
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit(f"another generate process is running for {model_dir}") from None
     done = {c["task_id"] for c in _jsonl(model_dir / "checks.jsonl") if c["phase"] == "after_query"}
     for t in tasks[:limit]:
         if t["task_id"] in done:
@@ -439,6 +445,21 @@ def assert_no_secrets(run_dir: Path, credentials_file: str | None = None) -> Non
                 raise SystemExit(f"possible credential in {p.relative_to(run_dir)}; refusing to write checksums")
 
 
+def dedupe(writes: list[dict[str, Any]], checks: list[dict[str, Any]]) -> tuple[list, list, dict[str, int]]:
+    """Keep the first record per (task, step) and per (task, check phase, minute). Duplicates can
+    only come from overlapping generate processes; the raw traces keep them, scoring does not."""
+    seen_w, seen_c, w, c = set(), set(), [], []
+    for x in writes:
+        if (k := (x["task_id"], x["step"])) not in seen_w:
+            seen_w.add(k)
+            w.append(x)
+    for x in checks:
+        if (k := (x["task_id"], x["phase"], x["minute"])) not in seen_c:
+            seen_c.add(k)
+            c.append(x)
+    return w, c, {"writes_dropped": len(writes) - len(w), "checks_dropped": len(checks) - len(c)}
+
+
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -458,9 +479,9 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
         tasks = d_env.load_tasks(split)
     rows: list[dict[str, Any]] = []
     out.mkdir(parents=True, exist_ok=True)
-    agents, snaps_by = {}, {}
+    agents, snaps_by, duplicates = {}, {}, {}
     for md in model_dirs:
-        writes, checks = _jsonl(md / "writes.jsonl"), _jsonl(md / "checks.jsonl")
+        writes, checks, duplicates[md.name] = dedupe(_jsonl(md / "writes.jsonl"), _jsonl(md / "checks.jsonl"))
         (out / md.name).mkdir(exist_ok=True)
         for f in ("scores.jsonl", "trust.jsonl"):
             (out / md.name / f).unlink(missing_ok=True)
@@ -477,7 +498,7 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
     if split == "stress":
         summary["stress"] = {md.name: stress_analysis(tasks, [r for r in rows if r["model_name"] == md.name],
                                                       {m: snaps_by[(md.name, m)] for m in cfg["methods"]},
-                                                      _jsonl(md / "writes.jsonl"), cfg["role_prior"])
+                                                      dedupe(_jsonl(md / "writes.jsonl"), [])[0], cfg["role_prior"])
                              for md in model_dirs}
     offline = os.getenv("MEMORY_OFFLINE_RETRIEVAL", "").lower() in ("1", "true", "yes")
     manifest = {
@@ -488,6 +509,7 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
         "reranker": "none (offline)" if offline else cfg["retrieval_pinned"]["reranker_model"],
         "retrieval_settings": {**cfg["retrieval_pinned"], "offline_retrieval": offline},
         "models": {md.name: agents[md.name]["models_returned"] for md in model_dirs},
+        "duplicate_records_dropped": duplicates,
         "n_tasks_scored": {md.name: len({r["task_id"] for r in rows if r["model_name"] == md.name}) for md in model_dirs},
         "llm_calls": sum(a["calls"] for a in agents.values()),
         "api_cost_usd": round(sum(a["cost_usd"] for a in agents.values()), 6),
@@ -500,7 +522,7 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
     (out / "report.md").write_text(report(summary, cfg) + (stress_report(summary["stress"]) if "stress" in summary else ""))
     assert_no_secrets(run_dir, cfg.get("credentials_file"))
-    sums = sorted(p for p in run_dir.rglob("*") if p.is_file() and p.name != "SHA256SUMS")
+    sums = sorted(p for p in run_dir.rglob("*") if p.is_file() and p.name != "SHA256SUMS" and not p.name.startswith("."))
     (run_dir / "SHA256SUMS").write_text("".join(f"{_sha(p)}  {p.relative_to(run_dir)}\n" for p in sums))
     return summary
 
