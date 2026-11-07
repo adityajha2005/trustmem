@@ -1,0 +1,78 @@
+# Benchmark D: real LLM agents, deterministic ground truth. Frozen with the design
+# (docs/BENCHMARK_D.md). Changing anything below after a run starts gives a new run version;
+# existing run artifacts are never overwritten.
+
+# Trust parameters: identical to Benchmark C (experiments/c_params.yaml) so methods match.
+role_prior:
+  planner: 0.60
+  coder: 0.70
+  verifier: 0.95
+prior_strength: 4
+retention: 0.90
+topic_threshold: 3
+
+top_k: 5
+
+# Task splits. Pilot and full use different seeds, so inspecting the pilot never reveals full tasks.
+splits:
+  pilot: {seed: "pilot-v1", tasks: 25}
+  full: {seed: "full-v1", tasks: 100}
+
+# Hard spend caps in USD per run directory (all models together), checked before every call
+# against recorded usage plus the worst case of the next call.
+budget_usd:
+  pilot: 10.0
+  full: 30.0
+
+calls:
+  max_parse_attempts: 2   # one retry when the reply is not valid JSON / misses fields
+  max_api_retries: 2      # transient errors only (rate limit, timeout, 5xx); auth errors stop the run
+
+# Models. Prices are USD per 1M tokens. They come from SECONDARY sources and are NOT
+# verified: live generation refuses to start until price_verified is true for the model,
+# which requires checking the official pricing page and filling in price_checked_on.
+models:
+  grok-4.7:
+    provider: xai
+    model_id: grok-4.7
+    params: {temperature: 0, max_tokens: 2000}
+    price_in: 2.00
+    price_cached_in: 0.50
+    price_out: 6.00
+    price_verified: false
+    price_checked_on: null
+    price_source: https://docs.x.ai/docs/models
+  gpt-6.1-sol:
+    provider: openai
+    model_id: gpt-6.1-sol
+    params: {temperature: 0, max_completion_tokens: 2000}
+    price_in: 2.00
+    price_cached_in: 0.10
+    price_out: 10.00
+    price_verified: false
+    price_checked_on: null
+    price_source: https://openai.com/api/pricing/
+  gpt-6-luna:
+    provider: openai
+    model_id: gpt-6-luna
+    params: {temperature: 0, max_completion_tokens: 2000}
+    price_in: 0.10
+    price_cached_in: 0.01
+    price_out: 0.50
+    price_verified: false
+    price_checked_on: null
+    price_source: https://openai.com/api/pricing/
+
+# The four methods, mapped onto the Benchmark C conditions of the same name.
+methods:
+  dense: {technique: simple_rag, ablation: null, reliability: null, evidence: false}
+  static: {technique: collaborative, ablation: full_rerank, reliability: null, evidence: false}
+  learned: {technique: collaborative, ablation: full_rerank, reliability: beta, evidence: false}
+  learned_evidence: {technique: collaborative, ablation: full_rerank, reliability: beta, evidence: true}
+
+# Pre-registered primary comparisons (paired by task, pooled over models; full split only).
+primary_comparisons:
+  - [learned, static]
+  - [learned_evidence, learned]
+  - [learned_evidence, dense]
+bootstrap: {resamples: 2000, seed: 7}
