@@ -1,0 +1,71 @@
+{
+  "api_cost_usd": 0.268559,
+  "created": "2026-11-07T10:18:23+00:00",
+  "duplicate_records_dropped": {
+    "gpt-6-luna": {
+      "checks_dropped": 2,
+      "writes_dropped": 4
+    },
+    "gpt-6.1-sol": {
+      "checks_dropped": 0,
+      "writes_dropped": 0
+    },
+    "grok-4.7": {
+      "checks_dropped": 0,
+      "writes_dropped": 0
+    }
+  },
+  "embeddings": "BAAI/bge-small-en-v1.5",
+  "eval_name": "eval-v2",
+  "git_commit": "5c5b99c0bb081649e132e85a259672ab73c27b78",
+  "inputs_sha256": {
+    "d_agents.py": "26ff2100cd2a8810feb966e24765c085ccccd11a24c58d639e4868eff88de3d5",
+    "d_config.yaml": "95854b1c730e0cc4c70f56baca1ea42e2246a1a658c5b06042c9e0e8d976e396",
+    "d_env.py": "eebdd56000d69fc75986397d20aa74bfa8643fc1273ab1cea2a440e152e713cc",
+    "d_run.py": "b936fbcc29cbddaf7e3e63cdd733f74c38df947b663365ba46e78677688d9348"
+  },
+  "llm_calls": 155,
+  "models": {
+    "gpt-6-luna": [
+      "gpt-6-luna"
+    ],
+    "gpt-6.1-sol": [
+      "gpt-6.1-sol"
+    ],
+    "grok-4.7": [
+      "grok-4.7"
+    ]
+  },
+  "n_tasks_scored": {
+    "gpt-6-luna": 25,
+    "gpt-6.1-sol": 25,
+    "grok-4.7": 25
+  },
+  "prompt_templates_sha256": "7edc73b6488c87d03ebbb1793f90ba0af184569bfa55398f95df69ca85840155",
+  "python": "3.12.13",
+  "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+  "retrieval_settings": {
+    "default_min_trust": 0.0,
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "fusion_importance_weight": 0.1,
+    "fusion_semantic_weight": 0.3,
+    "fusion_trust_weight": 0.3,
+    "importance_weight": 0.15,
+    "offline_retrieval": false,
+    "preserve_top_trusted_k": 1,
+    "recency_half_life_hours": 168.0,
+    "recency_weight": 0.15,
+    "reranker_model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "reranker_weight": 0.3,
+    "retrieval_candidate_k": 50,
+    "retrieval_top_k": 5,
+    "semantic_weight": 0.45,
+    "trust_bucket_reranking": false,
+    "trust_bucket_threshold": 0.05,
+    "trust_threshold": 0.0,
+    "trust_weight": 0.25,
+    "use_reranker": false
+  },
+  "run_id": "stress-v1",
+  "tasks_sha256": "d38d9bf59d1558b64925f9c0282574396bcbe63650194327e05e0d56c032df40"
+}
