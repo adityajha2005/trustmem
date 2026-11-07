@@ -108,7 +108,7 @@ def test_ledger_records_usage_cost_and_stops_on_model_substitution(tmp_path) -> 
     ledger = d_agents.Ledger.open(tmp_path, tmp_path / "m", cap_usd=10)
     msgs = d_agents.build_messages("planner", _tasks(1)[0], "2026-03-02T09:10Z", None, [])
     _, rec = ledger.call(FakeAPI("openai", "gpt-6.1-sol"), model, msgs, {"task_id": "t"}, 0)
-    assert rec["cost_usd"] == pytest.approx((900 * 2.0 + 100 * 0.10 + 500 * 10.0) / 1e6)
+    assert rec["cost_usd"] == pytest.approx((1000 * 2.0 + 500 * 10.0) / 1e6)  # cached billed at full input price
     assert rec["model_returned"] == "gpt-6.1-sol" and rec["prompt_sha256"] == d_agents.messages_sha256(msgs)
     with pytest.raises(d_agents.ModelMismatch):
         ledger.call(FakeAPI("openai", "gpt-6.1-sol", returned="gpt-6-luna"), model, msgs, {"task_id": "t"}, 0)
@@ -128,25 +128,47 @@ def test_budget_cap_is_enforced_across_sessions(tmp_path) -> None:
 
 
 def test_live_generation_refuses_unverified_prices_and_mock_run_ids(tmp_path) -> None:
+    unverified = {**CFG, "models": {**CFG["models"], "gpt-6-luna": {**CFG["models"]["gpt-6-luna"], "price_verified": False}}}
     with pytest.raises(SystemExit, match="price not verified"):
-        d_run.generate("pilot", "gpt-6-luna", "pilot-test", cfg=CFG, runs_dir=tmp_path, tasks=_tasks(1))
+        d_run.generate("pilot", "gpt-6-luna", "pilot-test", cfg=unverified, runs_dir=tmp_path, tasks=_tasks(1))
     with pytest.raises(SystemExit, match="mock"):
         d_run.generate("pilot", "gpt-6-luna", "pilot-test", mock=True, cfg=CFG, runs_dir=tmp_path, tasks=_tasks(1))
 
 
-def test_openai_client_stops_without_key(monkeypatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(SystemExit, match="OPENAI_API_KEY is not set"):
-        d_agents.OpenAICompatClient("openai", "gpt-6-luna")
+def test_only_the_provider_key_is_read_from_the_credentials_file(tmp_path, monkeypatch) -> None:
+    import os
+
+    creds = tmp_path / "creds.env"
+    creds.write_text("XAI_API_KEY=x-file\nOPENAI_API_KEY=o-file\nMEMORY_SEMANTIC_WEIGHT=0.99\nXAI_BASE_URL=https://us.api.x.ai/v1\n")
+    monkeypatch.delenv("MEMORY_SEMANTIC_WEIGHT", raising=False)
+    monkeypatch.delenv("XAI_API_KEY", raising=False)
+    assert d_agents.load_api_key("xai", creds) == "x-file"
+    assert d_agents.load_api_key("openai", creds) == "o-file"
+    assert "MEMORY_SEMANTIC_WEIGHT" not in os.environ and "XAI_API_KEY" not in os.environ
+    with pytest.raises(SystemExit, match="not found"):
+        d_agents.load_api_key("xai", tmp_path / "missing.env")
+    xai = d_agents.OpenAICompatClient("xai", "grok-4.7", d_agents.load_api_key("xai", creds))
+    oai = d_agents.OpenAICompatClient("openai", "gpt-6-luna", d_agents.load_api_key("openai", creds))
+    # each provider gets its own key; the endpoint is fixed (a base-URL setting in the file is ignored)
+    assert (xai._client.api_key, str(xai._client.base_url).rstrip("/")) == ("x-file", "https://api.x.ai/v1")
+    assert (oai._client.api_key, str(oai._client.base_url).rstrip("/")) == ("o-file", "https://api.openai.com/v1")
+    with pytest.raises(SystemExit, match="no API key"):
+        d_agents.OpenAICompatClient("openai", "gpt-6-luna", "")
 
 
-def test_each_provider_gets_its_own_key_and_endpoint(monkeypatch) -> None:
-    monkeypatch.setenv("XAI_API_KEY", "x-test")
-    monkeypatch.setenv("OPENAI_API_KEY", "o-test")
-    xai = d_agents.OpenAICompatClient("xai", "grok-4.7")  # constructing makes no network call
-    oai = d_agents.OpenAICompatClient("openai", "gpt-6-luna")
-    assert (xai._client.api_key, str(xai._client.base_url).rstrip("/")) == ("x-test", "https://api.x.ai/v1")
-    assert (oai._client.api_key, str(oai._client.base_url).rstrip("/")) == ("o-test", "https://api.openai.com/v1")
+def test_regional_surcharge_is_priced() -> None:
+    assert d_agents.endpoint_multiplier("https://api.x.ai/v1") == 1.0
+    assert d_agents.endpoint_multiplier("https://us.api.x.ai/v1") == 1.1
+    m = {**CFG["models"]["grok-4.7"], "price_multiplier": 1.1}
+    usage = {"prompt_tokens": 1000, "completion_tokens": 1000, "cached_tokens": 0}
+    assert d_agents.cost_usd(usage, m) == pytest.approx(1.1 * (1000 * 2 + 1000 * 6) / 1e6)
+
+
+def test_replay_retrieval_settings_are_pinned_against_the_environment(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MEMORY_SEMANTIC_WEIGHT", "0.99")
+    monkeypatch.setenv("MEMORY_EMBEDDING_MODEL", "some/other-model")
+    config = d_run.pinned_config("t", tmp_path, CFG)
+    assert config.semantic_weight == 0.45 and config.embedding_model == "BAAI/bge-small-en-v1.5"
 
 
 def test_unparseable_reply_is_retried_then_recorded_not_dropped(tmp_path) -> None:

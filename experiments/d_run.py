@@ -68,16 +68,17 @@ def _append(path: Path, rows: list[dict[str, Any]]) -> None:
 # --------------------------------------------------------------------------------------------
 
 
-def make_client(model: dict[str, Any], mock: bool) -> d_agents.Client:
+def make_client(model: dict[str, Any], mock: bool, cfg: dict[str, Any]) -> d_agents.Client:
     if mock:
         return d_agents.MockClient(model["model_id"])
     if not model.get("price_verified"):
         raise SystemExit(f"{model['model_id']}: price not verified against the official pricing page; "
                          "set price_verified and price_checked_on in d_config.yaml first.")
-    from utils.config import load_config as load_app_config
-
-    load_app_config()  # loads .env / .env.local into the environment; values are never printed
-    return d_agents.OpenAICompatClient(model["provider"], model["model_id"])
+    client = d_agents.OpenAICompatClient(model["provider"], model["model_id"],
+                                         d_agents.load_api_key(model["provider"], cfg["credentials_file"]))
+    if d_agents.endpoint_multiplier(client.base_url) != model.get("price_multiplier", 1.0):
+        raise SystemExit(f"{model['model_id']}: price_multiplier does not match the endpoint {client.base_url}")
+    return client
 
 
 def generate(split: str, model_name: str, run_id: str, *, client: d_agents.Client | None = None,
@@ -87,7 +88,7 @@ def generate(split: str, model_name: str, run_id: str, *, client: d_agents.Clien
     if mock != run_id.startswith("mock"):
         raise SystemExit("mock runs must use a run id starting with 'mock', live runs must not")
     model = cfg["models"][model_name]
-    client = client or make_client(model, mock)
+    client = client or make_client(model, mock, cfg)
     tasks = tasks if tasks is not None else d_env.load_tasks(split)
     run_dir = runs_dir / run_id
     model_dir = run_dir / model_name
@@ -152,6 +153,16 @@ def _check(t: dict[str, Any], minute: int, phase: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------------------------
 
 
+def pinned_config(name: str, tmp: Path, cfg: dict[str, Any]):
+    """Benchmark C's retrieval settings, pinned: no .env, .env.local or MEMORY_* variable can change them.
+    Only offline_retrieval (hash embeddings in tests) still follows the environment."""
+    from benchmarks._helpers import make_bench_config
+
+    config = make_bench_config(name, faiss_dir=tmp).model_copy(update=cfg["retrieval_pinned"])
+    assert all(getattr(config, k) == v for k, v in cfg["retrieval_pinned"].items())
+    return config
+
+
 def make_reliability(kind: str | None, cfg: dict[str, Any]):
     from memory.reliability import BetaReliability
 
@@ -173,7 +184,7 @@ def replay(method: str, tasks: list[dict[str, Any]], writes: list[dict[str, Any]
     """One method over one model's recorded run, with its own fresh database and trust state."""
     from baselines.factory import create_backend
     from baselines.runtime import configure_torch_safety
-    from benchmarks._helpers import make_bench_config, reset_storage_engine
+    from benchmarks._helpers import reset_storage_engine
     from experiments.real_run import _ablation
     from memory.evidence import Evidence, expired, topic_of
     from memory.reliability import learn
@@ -196,7 +207,7 @@ def replay(method: str, tasks: list[dict[str, Any]], writes: list[dict[str, Any]
     tmp = Path(tempfile.mkdtemp(prefix=f"bench_d_{method}_"))
     rows, snapshots = [], []
     try:
-        config = make_bench_config(f"bench_d_{method}", faiss_dir=tmp)
+        config = pinned_config(f"bench_d_{method}", tmp, cfg)
         init_db(config)
         with session_scope(config) as session:
             store = SQLiteMemoryStore(session)
@@ -393,8 +404,14 @@ def agent_summary(model_dir: Path) -> dict[str, Any]:
     }
 
 
-def assert_no_secrets(run_dir: Path) -> None:
+def assert_no_secrets(run_dir: Path, credentials_file: str | None = None) -> None:
     secrets = [v for v in (os.getenv("XAI_API_KEY"), os.getenv("OPENAI_API_KEY")) if v and len(v) >= 8]
+    if credentials_file:
+        for provider in d_agents.PROVIDERS:
+            try:
+                secrets.append(d_agents.load_api_key(provider, credentials_file))  # compared, never shown
+            except SystemExit:
+                pass
     for p in run_dir.rglob("*"):
         if p.is_file():
             text = p.read_text(errors="ignore")
@@ -437,19 +454,13 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
         agents[md.name] = agent_summary(md)
     summary = {"retrieval": summarize(rows, cfg), "agents": agents}
     offline = os.getenv("MEMORY_OFFLINE_RETRIEVAL", "").lower() in ("1", "true", "yes")
-    from utils.config import load_config as load_app_config
-
-    app = load_app_config()
     manifest = {
         "run_id": run_id, "eval_name": eval_name, "created": datetime.now(UTC).isoformat(timespec="seconds"),
         "git_commit": subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip(),
         "python": platform.python_version(),
-        "embeddings": "hash (offline)" if offline else app.embedding_model,
-        "reranker": "none (offline)" if offline else app.reranker_model,
-        "retrieval_settings": {k: getattr(app, k, None) for k in (
-            "embedding_model", "reranker_model", "use_reranker", "retrieval_top_k", "retrieval_candidate_k",
-            "recency_half_life_hours", "offline_retrieval")} | {"weights": {
-            k: v for k, v in app.model_dump().items() if k.startswith("weight") or k.endswith("_weight")}},
+        "embeddings": "hash (offline)" if offline else cfg["retrieval_pinned"]["embedding_model"],
+        "reranker": "none (offline)" if offline else cfg["retrieval_pinned"]["reranker_model"],
+        "retrieval_settings": {**cfg["retrieval_pinned"], "offline_retrieval": offline},
         "models": {md.name: agents[md.name]["models_returned"] for md in model_dirs},
         "n_tasks_scored": {md.name: len({r["task_id"] for r in rows if r["model_name"] == md.name}) for md in model_dirs},
         "llm_calls": sum(a["calls"] for a in agents.values()),
@@ -462,7 +473,7 @@ def evaluate(run_id: str, *, eval_name: str = "eval-v1", runs_dir: Path = RUNS, 
     (out / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True))
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
     (out / "report.md").write_text(report(summary, cfg))
-    assert_no_secrets(run_dir)
+    assert_no_secrets(run_dir, cfg.get("credentials_file"))
     sums = sorted(p for p in run_dir.rglob("*") if p.is_file() and p.name != "SHA256SUMS")
     (run_dir / "SHA256SUMS").write_text("".join(f"{_sha(p)}  {p.relative_to(run_dir)}\n" for p in sums))
     return summary

@@ -25,10 +25,28 @@ from typing import Any, Protocol
 
 from experiments.d_env import CLAIMS, keys_for, normalize
 
-PROVIDERS = {  # same endpoints and key variables as experiments/real_run.py
-    "xai": ("XAI_API_KEY", "XAI_BASE_URL", "https://api.x.ai/v1"),
-    "openai": ("OPENAI_API_KEY", "OPENAI_BASE_URL", "https://api.openai.com/v1"),
+PROVIDERS = {  # key variable (same names as experiments/real_run.py) and the only endpoint allowed
+    "xai": ("XAI_API_KEY", "https://api.x.ai/v1"),  # global endpoint; us.api.x.ai would bill 1.1x
+    "openai": ("OPENAI_API_KEY", "https://api.openai.com/v1"),
 }
+REGIONAL_SURCHARGE = {"us.api.x.ai": 1.1}  # xAI docs: the US regional endpoint bills 1.1x global rates
+
+
+def endpoint_multiplier(base_url: str) -> float:
+    return next((m for host, m in REGIONAL_SURCHARGE.items() if host in base_url), 1.0)
+
+
+def load_api_key(provider: str, credentials_file: str | Path) -> str:
+    """Read ONLY this provider's key from the existing credentials file. Nothing else from the
+    file is used or put in the process environment, and the value is never printed or stored."""
+    from dotenv import dotenv_values
+
+    key_env = PROVIDERS[provider][0]
+    path = Path(credentials_file).expanduser()
+    value = (dotenv_values(path).get(key_env) or "").strip() if path.is_file() else ""
+    if not value:
+        raise SystemExit(f"{key_env} not found in {path}. Stopping: credentials are never created or rotated here.")
+    return value
 
 ROLE_DESC = {
     "planner": "You research the project and propose facts for the team to build on.",
@@ -146,18 +164,17 @@ class TransientError(RuntimeError):
 
 
 class OpenAICompatClient:
-    """xAI and OpenAI through the OpenAI SDK, with the keys already in the environment."""
+    """xAI and OpenAI through the OpenAI SDK, on the fixed global endpoint, with an explicit key."""
 
-    def __init__(self, provider: str, model_id: str) -> None:
-        key_env, url_env, url_default = PROVIDERS[provider]
-        api_key = os.getenv(key_env, "").strip()
-        if not api_key:
-            raise SystemExit(f"{key_env} is not set. Stopping: credentials are not created or changed by this tool.")
+    def __init__(self, provider: str, model_id: str, api_key: str) -> None:
         from openai import OpenAI
 
+        if not api_key:
+            raise SystemExit(f"no API key for {provider}. Stopping: credentials are never created or rotated here.")
         self.provider, self.model_id = provider, model_id
+        self.base_url = PROVIDERS[provider][1]
         # The provider's own key, explicitly: the SDK would otherwise fall back to OPENAI_API_KEY.
-        self._client = OpenAI(api_key=api_key, base_url=os.getenv(url_env, url_default), max_retries=0)
+        self._client = OpenAI(api_key=api_key, base_url=self.base_url, max_retries=0)
 
     def complete(self, messages: list[dict[str, str]], params: dict[str, Any]) -> Reply:
         import openai
@@ -234,13 +251,14 @@ def returned_model_ok(requested: str, returned: str) -> bool:
 def cost_usd(usage: dict[str, int], m: dict[str, Any]) -> float:
     cached = usage.get("cached_tokens", 0)
     fresh = max(usage["prompt_tokens"] - cached, 0)
-    return (fresh * m["price_in"] + cached * m.get("price_cached_in", m["price_in"]) + usage["completion_tokens"] * m["price_out"]) / 1e6
+    base = fresh * m["price_in"] + cached * m.get("price_cached_in", m["price_in"]) + usage["completion_tokens"] * m["price_out"]
+    return base * m.get("price_multiplier", 1.0) / 1e6
 
 
 def worst_case_usd(messages: list[dict[str, str]], m: dict[str, Any]) -> float:
     est_in = sum(len(x["content"]) for x in messages) // 3 + 50
     max_out = m["params"].get("max_completion_tokens") or m["params"].get("max_tokens") or 4000
-    return (est_in * m["price_in"] + max_out * m["price_out"]) / 1e6
+    return (est_in * m["price_in"] + max_out * m["price_out"]) * m.get("price_multiplier", 1.0) / 1e6
 
 
 @dataclass
@@ -292,7 +310,7 @@ class Ledger:
         self.spent += cost
         record = {
             **meta, "origin": "llm_agent", "provider": client.provider, "model_requested": model["model_id"],
-            "model_returned": reply.returned_model, "params": model["params"], "prompt_sha256": digest,
+            "model_returned": reply.returned_model, "base_url": getattr(client, "base_url", None), "params": model["params"], "prompt_sha256": digest,
             "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"), "latency_ms": round(latency_ms, 1),
             "usage": reply.usage, "cost_usd": round(cost, 8), "finish_reason": reply.finish_reason,
             "response_text": reply.text, "api_attempt": attempt,

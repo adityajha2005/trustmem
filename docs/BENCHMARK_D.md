@@ -172,3 +172,17 @@ These were found during the Stage 2 review, using the offline mock run.
 - Temperature 0 has no fallback. If a model rejects it, the pilot stops and the config gets a new version.
 - The design commit and the harness commit were made in the same session, minutes apart. That is a commit order, not an independent freeze.
 - The repeat subset will be `generate --limit 20` under a new run id.
+
+## Pilot preparation (2026-11-07, before any live call)
+
+- **Prices.** The user verified the input and output prices on the official pages:
+  | Model | Price per million tokens, in / out |
+  |---|---|
+  | GPT-6.1 Sol | $2 / $10 |
+  | GPT-6 Luna | $0.10 / $0.50 |
+  | Grok 4.7 | $2 / $6 |
+
+  Cached-input discounts were not verified, so cached tokens are billed at the full input price.
+- **Endpoints.** Calls go only to the fixed global endpoints (`api.x.ai`, `api.openai.com`). xAI bills its US regional endpoint (`us.api.x.ai`) at 1.1×. The cost code applies `price_multiplier`, and generation refuses to start if the multiplier doesn't match the endpoint.
+- **Credentials.** Only `XAI_API_KEY` and `OPENAI_API_KEY` are read from `~/Multi-agent/.env.local`, in memory. Nothing else from that file is used or put in the environment. The trustmem `.env.local` is not linked.
+- **Retrieval settings.** Replay pins them to Benchmark C (`retrieval_pinned` in `d_config.yaml`), overriding any `.env`, `.env.local` or `MEMORY_*` value.
