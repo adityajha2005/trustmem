@@ -21,7 +21,7 @@ I wanted numbers on how often this actually happens, so I ran 40 tasks like the 
 | Vector search + MS MARCO cross-encoder | 70% | 82% | 88% |
 | trustmem | **0%** | **0%** | **0%** |
 
-*How often the top result was the outdated note. 40 tasks per model; the 95% interval on 0/40 is 0 to 9%.*
+*How often the top result was the outdated note, on 40 controlled tasks per model; the 95% interval on 0/40 is 0 to 9%. The agents' notes go in as plain shared memories with no `supersedes` links, so this measures trust-aware ranking alone. Writing the verifier's note first instead of last, so recency favors the stale notes, gives the same 0%.*
 
 The cross-encoder mostly makes it worse. That's the part that surprised me.
 
@@ -101,6 +101,7 @@ The fix is only as good as your confidence numbers. I replayed the same 120 runs
 | Random noise (±0.15) on every agent | 17% |
 | A confidently wrong agent on 27.5% of tasks | 28% |
 | No signal (every agent the same) | 78%, same as plain search |
+| Correct, but verifier writes first (recency favors the stale note) | 0% |
 
 It fails on exactly the tasks where trust is wrong. What you get is a different problem: instead of retrieval picking the wrong note, you have to decide who to trust, and that one you can measure and work on.
 

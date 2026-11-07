@@ -213,11 +213,13 @@ def run_condition(
     rows: list[dict[str, Any]],
     tasks: dict[str, dict],
     confidence: Callable[[str, str], float] | None = None,
+    reverse_time: bool = False,
 ) -> list[dict]:
     """Insert every generation into a fresh store and query each task once.
 
     ``confidence(task_id, role)`` overrides the role's stored confidence (noisy-trust
     runs). Labels and metrics always use the *true* roles: the verifier is right.
+    ``reverse_time`` writes the verifier first, so recency favors the stale notes.
     """
     from baselines.factory import create_backend
     from baselines.runtime import configure_torch_safety
@@ -250,7 +252,9 @@ def run_condition(
             for row in rows:
                 tid = row["task_id"]
                 # Writes happen in role order, a few minutes apart (verifier is last).
-                for i, (role, conf) in enumerate(ROLES.items()):
+                order = list(ROLES.items())
+                for i, (role, conf) in enumerate(order):
+                    slot = len(order) - 1 - i if reverse_time else i
                     for j, field in enumerate(("key_note", "other_note")):
                         mem = store.create(
                             Memory(
@@ -260,7 +264,7 @@ def run_condition(
                                 task_id=tid,
                                 confidence=confidence(tid, role) if confidence else conf,
                                 importance=0.8 if field == "key_note" else 0.5,
-                                timestamp=at(minutes=10 * i + j),
+                                timestamp=at(minutes=10 * slot + j),
                             )
                         )
                         records.setdefault(tid, []).append(
@@ -404,6 +408,10 @@ def noisy(run_dir: Path, tasks: list[dict[str, str]], conditions=("dense_rerank"
             results += run_condition(cond, rows, by_id, confidence=fn)
         out[name] = summarize(results)
         print_summary(f"{run_dir.name} / {name}", out[name])
+    # Recency confound: same notes, verifier written first instead of last.
+    results = [r for cond in conditions for r in run_condition(cond, rows, by_id, reverse_time=True)]
+    out["reverse_time"] = summarize(results)
+    print_summary(f"{run_dir.name} / reverse_time", out["reverse_time"])
     (run_dir / "noisy_summary.json").write_text(json.dumps(out, indent=2))
     return out
 
