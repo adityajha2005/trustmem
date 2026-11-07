@@ -186,3 +186,24 @@ These were found during the Stage 2 review, using the offline mock run.
 - **Endpoints.** Calls go only to the fixed global endpoints (`api.x.ai`, `api.openai.com`). xAI bills its US regional endpoint (`us.api.x.ai`) at 1.1×. The cost code applies `price_multiplier`, and generation refuses to start if the multiplier doesn't match the endpoint.
 - **Credentials.** Only `XAI_API_KEY` and `OPENAI_API_KEY` are read from `~/Multi-agent/.env.local`, in memory. Nothing else from that file is used or put in the environment. The trustmem `.env.local` is not linked.
 - **Retrieval settings.** Replay pins them to Benchmark C (`retrieval_pinned` in `d_config.yaml`), overriding any `.env`, `.env.local` or `MEMORY_*` value.
+
+## Status: primary evaluation frozen at 75 tasks (2026-11-07)
+
+The primary real-agent evaluation of Benchmark D is the **pilot-v2** run: 25 tasks on each of three models (`gpt-6-luna`, `gpt-6.1-sol`, `grok-4.7`), 75 tasks and 255 live calls in total, costing $0.50.
+
+- **The evaluation is exploratory, not confirmatory.** With 25 paired tasks per model the intervals are wide, and per-scenario results (6 to 9 tasks pooled) are descriptive only.
+- **The 100-task full split was not run.** The user decided the extra cost wasn't justified. `tasks/full.jsonl` stays as the frozen but unused task file, and the comparisons pre-registered for the full split were not tested.
+- **The pilot-v2 artifacts (traces, eval-v1 report, SHA256SUMS) are final.** Any rescoring goes under a new `--eval-name`.
+
+Headline (`eval-v1`, pooled correct@1):
+
+| Method | correct@1 |
+|---|---|
+| dense | 0.43 (32/75) |
+| static | 0.79 (59/75) |
+| learned | 0.79 (59/75), with the same top result as static in 74 of 75 tasks |
+| learned_evidence | 0.80 (60/75) |
+
+When the lower-prior agent was right, every trust method failed (0/9) and dense got 6/9. Learned trust moved, but never changed the order of the roles. The conflict flag fired in none of the 52 tasks with conflicting claims. Agents recorded an expiry in only 4 to 6 of 85 writes per model.
+
+A separate secondary experiment on changing reliability lives under `results/benchmark_d/adaptive_trust_stress/`. Its results are never pooled with pilot-v2.

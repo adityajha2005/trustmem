@@ -1,6 +1,8 @@
 # Benchmark D artifacts
 
-Design and pre-registration: `docs/BENCHMARK_D.md`. No live results yet. Pilot and full runs are added only after review.
+Design and status: `docs/BENCHMARK_D.md`.
+
+**Primary result: `runs/pilot-v2/`.** 75 real-agent tasks (25 × 3 models). This evaluation is exploratory, not confirmatory. The 100-task full split (`tasks/full.jsonl`) was not run. `runs/pilot-v1/` is an aborted run with no output (see `ABORTED.txt`). The secondary experiment `adaptive_trust_stress/` is separate and not pooled with the primary result.
 
 | Path | Origin | Contents |
 |---|---|---|
