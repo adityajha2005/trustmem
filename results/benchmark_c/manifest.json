@@ -1,0 +1,27 @@
+{
+  "created": "2026-11-07T07:38:48+00:00",
+  "git_commit": "aaa83a4b62388c5e6e1ec61b1fbc880438e36030",
+  "python": "3.12.13",
+  "embeddings": "BAAI/bge-small-en-v1.5",
+  "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+  "conditions": [
+    "dense",
+    "dense_rerank",
+    "static",
+    "adaptive",
+    "adaptive_no_topic",
+    "adaptive_no_decay",
+    "ewma",
+    "evidence",
+    "adaptive_evidence"
+  ],
+  "n_tasks": 620,
+  "inputs_sha256": {
+    "c_params.yaml": "9fa9385407048be6a8fb7bebbc00ff82aafd4785b526280c6a83b2d14eba0ed0",
+    "c_scenarios.yaml": "491f0ae301e4bfce529b206ef63bd82fe85a1597e2c382c90e5b3e63d497259f",
+    "c_tasks.jsonl": "0da93cb2b3d2f74726b13c91b4b6bdbb74af8bdf6c19eaaf42ac878f427b78cb",
+    "c_predictions.yaml": "50f6e3ac741661a1e224ce82218c91cd0c7e2fdee91583cc755794de50f102f5"
+  },
+  "llm_calls": 0,
+  "api_cost_usd": 0.0
+}

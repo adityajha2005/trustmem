@@ -1,0 +1,606 @@
+[
+  {
+    "scenario": "s01_wrong_verifier",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.4
+    ],
+    "observed": 0.143,
+    "hit": true
+  },
+  {
+    "scenario": "s01_wrong_verifier",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.943,
+    "hit": true
+  },
+  {
+    "scenario": "s01_wrong_verifier",
+    "condition": "adaptive_no_topic",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.943,
+    "hit": true
+  },
+  {
+    "scenario": "s01_wrong_verifier",
+    "condition": "adaptive_no_decay",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.943,
+    "hit": true
+  },
+  {
+    "scenario": "s01_wrong_verifier",
+    "condition": "ewma",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.943,
+    "hit": true
+  },
+  {
+    "scenario": "s01_wrong_verifier",
+    "condition": "evidence",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s01_wrong_verifier",
+    "condition": "adaptive_evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.943,
+    "hit": true
+  },
+  {
+    "scenario": "s02_reliable_then_unreliable",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.25,
+      0.45
+    ],
+    "observed": 0.333,
+    "hit": true
+  },
+  {
+    "scenario": "s02_reliable_then_unreliable",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.65,
+      1.0
+    ],
+    "observed": 0.778,
+    "hit": true
+  },
+  {
+    "scenario": "s02_reliable_then_unreliable",
+    "condition": "adaptive",
+    "metric": "correct_from_index_9",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s02_reliable_then_unreliable",
+    "condition": "adaptive_no_decay",
+    "metric": "correct_from_index_9",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s02_reliable_then_unreliable",
+    "condition": "ewma",
+    "metric": "correct_from_index_9",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s02_reliable_then_unreliable",
+    "condition": "evidence",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s03_topic_dependent",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.4,
+      0.6
+    ],
+    "observed": 0.444,
+    "hit": true
+  },
+  {
+    "scenario": "s03_topic_dependent",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.889,
+    "hit": true
+  },
+  {
+    "scenario": "s03_topic_dependent",
+    "condition": "adaptive_no_topic",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.6
+    ],
+    "observed": 0.444,
+    "hit": true
+  },
+  {
+    "scenario": "s03_topic_dependent",
+    "condition": "ewma",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s04_similar_reliability",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.2,
+      0.8
+    ],
+    "observed": 0.429,
+    "hit": true
+  },
+  {
+    "scenario": "s04_similar_reliability",
+    "condition": "static",
+    "metric": "contested_rate",
+    "predicted": [
+      0.0,
+      0.0
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s04_similar_reliability",
+    "condition": "adaptive",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s04_similar_reliability",
+    "condition": "evidence",
+    "metric": "contested_rate",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s04_similar_reliability",
+    "condition": "adaptive_evidence",
+    "metric": "contested_rate",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s05_low_trust_verified",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.3,
+      0.7
+    ],
+    "observed": 0.429,
+    "hit": true
+  },
+  {
+    "scenario": "s05_low_trust_verified",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.886,
+    "hit": true
+  },
+  {
+    "scenario": "s05_low_trust_verified",
+    "condition": "ewma",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 0.971,
+    "hit": true
+  },
+  {
+    "scenario": "s06_outdated_with_expiry",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.1
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s06_outdated_with_expiry",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.1
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s06_outdated_with_expiry",
+    "condition": "evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 0.543,
+    "hit": false
+  },
+  {
+    "scenario": "s06_outdated_with_expiry",
+    "condition": "adaptive_evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 0.543,
+    "hit": false
+  },
+  {
+    "scenario": "s06b_outdated_no_expiry",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.1
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s06b_outdated_no_expiry",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s06b_outdated_no_expiry",
+    "condition": "evidence",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s07_successive_corrections",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.1,
+      0.6
+    ],
+    "observed": 0.314,
+    "hit": true
+  },
+  {
+    "scenario": "s07_successive_corrections",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.1,
+      0.6
+    ],
+    "observed": 0.314,
+    "hit": true
+  },
+  {
+    "scenario": "s07_successive_corrections",
+    "condition": "evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s07_successive_corrections",
+    "condition": "adaptive_evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s08_self_reinforcement",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.1
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s08_self_reinforcement",
+    "condition": "adaptive",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s08_self_reinforcement",
+    "condition": "ewma",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s08_self_reinforcement",
+    "condition": "evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.1
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s08_self_reinforcement",
+    "condition": "adaptive_evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.8,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s09_no_evidence",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.4
+    ],
+    "observed": 0.257,
+    "hit": true
+  },
+  {
+    "scenario": "s09_no_evidence",
+    "condition": "adaptive",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s09_no_evidence",
+    "condition": "adaptive_no_topic",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s09_no_evidence",
+    "condition": "adaptive_no_decay",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s09_no_evidence",
+    "condition": "ewma",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s09_no_evidence",
+    "condition": "evidence",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s09_no_evidence",
+    "condition": "adaptive_evidence",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s10_conflicting_sources",
+    "condition": "static",
+    "metric": "contested_rate",
+    "predicted": [
+      0.0,
+      0.0
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s10_conflicting_sources",
+    "condition": "evidence",
+    "metric": "contested_rate",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s10_conflicting_sources",
+    "condition": "adaptive_evidence",
+    "metric": "contested_rate",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s11_evidence_for_lower_trust",
+    "condition": "static",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.0,
+      0.1
+    ],
+    "observed": 0.0,
+    "hit": true
+  },
+  {
+    "scenario": "s11_evidence_for_lower_trust",
+    "condition": "adaptive",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "s11_evidence_for_lower_trust",
+    "condition": "evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "s11_evidence_for_lower_trust",
+    "condition": "adaptive_evidence",
+    "metric": "correct_after_burn_in",
+    "predicted": [
+      0.9,
+      1.0
+    ],
+    "observed": 1.0,
+    "hit": true
+  },
+  {
+    "scenario": "all (task 0)",
+    "condition": "adaptive",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "all (task 0)",
+    "condition": "adaptive_no_topic",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "all (task 0)",
+    "condition": "adaptive_no_decay",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  },
+  {
+    "scenario": "all (task 0)",
+    "condition": "ewma",
+    "metric": "same_as static",
+    "predicted": 0,
+    "observed": 0,
+    "hit": true
+  }
+]
