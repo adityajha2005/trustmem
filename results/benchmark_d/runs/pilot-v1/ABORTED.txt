@@ -1,0 +1,1 @@
+Aborted before any completed call: gpt-6-luna rejected temperature=0 (HTTP 400, not billed). No agent output. Superseded by pilot-v2 (temperature left at provider default for OpenAI models).

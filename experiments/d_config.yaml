@@ -78,7 +78,7 @@ models:
   gpt-6.1-sol:
     provider: openai
     model_id: gpt-6.1-sol
-    params: {temperature: 0, max_completion_tokens: 2000}
+    params: {max_completion_tokens: 2000}  # temperature: provider default (1); 0 rejected (HTTP 400, 2026-11-07)
     price_in: 2.00
     price_out: 10.00
     price_cached_in_unverified: true   # billed at price_in
@@ -90,7 +90,7 @@ models:
   gpt-6-luna:
     provider: openai
     model_id: gpt-6-luna
-    params: {temperature: 0, max_completion_tokens: 2000}
+    params: {max_completion_tokens: 2000}  # temperature: provider default (1); 0 rejected (HTTP 400, 2026-11-07)
     price_in: 0.10
     price_out: 0.50
     price_cached_in_unverified: true   # billed at price_in
