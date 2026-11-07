@@ -25,6 +25,8 @@ I wanted numbers on how often this actually happens, so I ran 40 tasks like the 
 
 The cross-encoder mostly makes it worse. That's the part that surprised me.
 
+The other half matters as much. In a second benchmark I made the most trusted agent wrong. With a confidently wrong verifier, trustmem put the right note first in **0 of 16** runs, while plain vector search got 9. trustmem ranks by who is trusted, so it is exactly as right as the agent it trusts. See [Benchmark B](#benchmark-b-30-harder-tasks) and [trust is a prior](#trust-is-a-prior).
+
 ## What trustmem does differently
 
 Every memory carries who wrote it, who can see it, how confident the author was, and whether it replaced an older note. Retrieval uses that twice. Before the vector search, it drops what the asking agent isn't allowed to see, drops archived notes, and keeps only the latest version of anything that was superseded. This costs under a millisecond. After the search, it blends the cross-encoder score with the author's confidence, so a stale note that shares the question's wording can't push a confirmed correction down the list.
@@ -120,6 +122,12 @@ The first benchmark always has one correction, made by the most trusted agent. B
 | Later decision by a lower-trust agent | 4 | 1 / 0 | 0 / 0 | 0 / 0 |
 
 trustmem does what it was built for: when the most trusted agent is right, it wins every time, including when the update never mentions the old note. When the most trusted agent is wrong or out of date, it follows that agent every time, which is worse than plain search (0 of 16 wrong-verifier runs against 9 of 16). Recency is also too weak to order two notes from the same agent: with a one-week half-life, a note written ten minutes later barely moves. The groups are small (3 to 8 tasks), so read these as patterns, not rates.
+
+### Trust is a prior
+
+The trust numbers in these runs come from roles: verifier 0.95, coder 0.70, planner 0.60. A role says who usually checks facts. It is not evidence that a given note is correct, and Benchmark B shows what happens when the two come apart. In practice you calibrate trust against things you can verify: tests that pass or fail, the production config, a human sign-off.
+
+Future work, not built yet: trust that starts from the role and then moves with each verified outcome, tracked per agent and per topic. A verifier whose notes keep being contradicted by the source of truth would lose rank, and a coder who keeps being right would gain it. trustmem stores `confidence` on every memory, so the retriever doesn't change; what's missing is the loop that updates those numbers.
 
 `python -m experiments.hard_run all --provider xai --provider openai` reruns it, and each run writes `label_check.csv` so you can confirm every generated note says the fact it was labelled with.
 
