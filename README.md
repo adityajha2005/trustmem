@@ -13,7 +13,7 @@ Put a few agents on one memory store and this happens a lot:
 
 Nothing is broken. The embeddings work and the reranker works. The old note just matches the question's wording better, and similarity search has no idea who wrote what or which note replaced which.
 
-I wanted numbers on how often this actually happens, so I ran 40 tasks like the one above with real LLM agents writing their own notes, on three models:
+I wanted numbers on how often this actually happens, so I ran 40 tasks like the one above with real LLM agents writing their own notes, on three models (Benchmark A):
 
 | Retrieval | Grok 4.7 | GPT-6 Luna | GPT-6.1 Sol |
 |---|---|---|---|
@@ -26,6 +26,23 @@ I wanted numbers on how often this actually happens, so I ran 40 tasks like the 
 The cross-encoder mostly makes it worse. That's the part that surprised me.
 
 The other half matters as much. In a second benchmark I made the most trusted agent wrong. With a confidently wrong verifier, trustmem put the right note first in **0 of 16** runs, while plain vector search got 9. trustmem ranks by who is trusted, so it is exactly as right as the agent it trusts. See [Benchmark B](#benchmark-b-30-harder-tasks) and [trust is a prior](#trust-is-a-prior).
+
+## Results at a glance
+
+Five evaluations, in the order they were run. Controlled results come from scripted or recorded runs with frozen tasks and fixed answers. The two Benchmark D runs are exploratory: 25 frozen tasks, the same ones for every model, so the three model streams are **not** independent replications.
+
+| | What it tests | Kind | Headline |
+|---|---|---|---|
+| [A](#the-problem) | Stale notes in plain retrieval; 40 tasks × 3 models, real LLM notes | Controlled tasks, recorded runs | Outdated note on top: vector search 68–88%, static trust 0 of 120 |
+| [B](#benchmark-b-30-harder-tasks) | Static trust when the trusted agent is wrong; 30 tasks × 2 models | Controlled tasks, recorded runs | Wrong verifier: static trust 0 of 16 correct, vector search 9 of 16 |
+| [C](#benchmark-c-learned-trust-and-evidence) | Learned trust and evidence; 620 scripted tasks, predictions committed before the code | Controlled, scripted, no LLM | Wrong verifier: 14% → 94% correct with verified history. No verification: 26%, against 66% for vector search |
+| [D pilot](#benchmark-d-real-llm-agents) | Same question with real agents writing notes; 75 tasks (25 × 3 models) | Exploratory | Correct@1: static 79%, learned 79%, learned + evidence 80%, vector search 43% |
+| [D stress](#adaptive-trust-stress-experiment) | A deliberately constructed reliability shift on one topic; 75 tasks (25 × 3 models) | Exploratory, targeted | Correct@1: learned per-topic trust 63 of 75, static 39 of 75, learned without topics 45 of 75 |
+
+What holds across all five:
+- Trust beats similarity when the trusted agent is right.
+- Static trust follows that agent when it is wrong.
+- Learned trust helps only when verified history shows the agent has gone wrong. In the real-agent pilot it changed nothing. In the stress experiment it adapted on the topic that degraded, and kept the agent's trust on the topic that didn't.
 
 ## What trustmem does differently
 
@@ -178,6 +195,89 @@ What extends existing code:
 
 One behaviour change: an agent's own notes no longer get trust 1.0 automatically. Visibility is decided by scope, and authorship no longer implies correctness. Re-scoring the recorded Benchmark A and B runs gives identical results ([results/historical/](results/historical/README.md), `pytest tests/test_historical_results.py`). The tag `baseline-static-trust` marks the code before these changes.
 
+## Benchmark D: real LLM agents
+
+Benchmark C scripted who was right. Benchmark D lets real LLM agents write the notes, while a harness keeps the ground truth deterministic. The harness generates small projects (a config file, an API spec, a lock file, a client module), changes facts on a timeline, and reads the true value back from the file. An agent shown an old copy may still answer correctly; it is scored on what it actually wrote. Design: [docs/BENCHMARK_D.md](docs/BENCHMARK_D.md).
+
+**Protocol**
+- Each model's agents act once per task.
+- The recorded notes are replayed through every retrieval method, each with its own database and trust state, one stream per model.
+- Per task: the notes are inserted, the query is scored, and only then does a post-query harness check update learned trust.
+- Agent notes never count as verification, and retrieval never changes trust.
+
+**Models and settings** (`experiments/d_config.yaml`)
+- `grok-4.7`: xAI global endpoint, temperature 0.
+- `gpt-6.1-sol` and `gpt-6-luna`: OpenAI, default temperature 1. They reject 0.
+- All three: at most 2,000 output tokens, and the same prompt templates.
+- Retrieval weights and trust parameters are pinned to Benchmark C's:
+  - role priors: planner 0.60, coder 0.70, verifier 0.95;
+  - Beta prior strength 4, retention 0.9, per-topic threshold 3.
+
+### Pilot: 75 tasks (exploratory)
+
+- **Tasks:** 10 scenarios, 25 frozen tasks, with the same tasks in the same order for every model.
+- **Calls:** 255 LLM calls, $0.50 in total.
+
+Correct@1, all three models pooled, as k/75 with Wilson 95% intervals:
+
+| Vector search | Static trust | Learned trust | Learned trust + evidence |
+|---|---|---|---|
+| 0.43 (32) [0.32, 0.54] | 0.79 (59) [0.68, 0.86] | 0.79 (59) [0.68, 0.86] | 0.80 (60) [0.70, 0.87] |
+
+- **Trust-aware ranking clearly beat vector search.** The paired bootstrap over tasks gives learned + evidence − vector search = +0.37 [0.15, 0.57].
+- **Learned trust did not improve on static trust.**
+  - The difference is exactly 0, and the top result differed in 1 of 75 tasks.
+  - Real verifiers were usually right, so the role priors were already about right. Learned trust moved, but never reordered the roles.
+- **Where static trust is wrong, learned trust didn't fix it in 25 tasks.** On the 9 tasks where a lower-prior agent was right and a higher-prior agent wrong, every trust method got 0, while vector search got 6.
+- **Agents recorded an expiry** in only 4–6 of 85 writes per model.
+- Raw results: [results/benchmark_d/runs/pilot-v2/](results/benchmark_d/runs/pilot-v2/). Report: [eval-v1/report.md](results/benchmark_d/runs/pilot-v2/eval-v1/report.md).
+- The planned 100-task run was not done, so the comparisons pre-registered for it were never tested.
+
+### Adaptive-trust stress experiment
+
+This is a separate, targeted experiment, designed after the pilot to test learned trust where it should matter. Its design, metrics and expected transitions were committed before any live call; it was not independently preregistered. Design: [docs/BENCHMARK_D_ADAPTIVE_TRUST.md](docs/BENCHMARK_D_ADAPTIVE_TRUST.md).
+
+**Setup**
+- **Two topics** in one stream of 25 tasks: dependencies and config.
+- **The reliability shift.** After 6 healthy tasks, the verifier's package mirror stops syncing, for dependencies only. Its header shows the sync date.
+- **Who sees what.**
+  - A lower-prior agent (planner or coder) sees the current lock file.
+  - On config, the verifier keeps reading the live file, and the lower agent reads an old handbook copy. This is the control topic.
+- **No agent is told to be wrong,** and agents never see each other's notes.
+
+Correct@1, pooled over the three models:
+
+| | Vector search | Static | Learned | Learned + evidence | Learned, no per-topic trust (diagnostic) |
+|---|---|---|---|---|---|
+| All 75 | 55 | 39 | **63** | 63 | 45 |
+| Dependencies, mirror frozen (36) | 21 | 0 | **24** | 24 | 15 |
+| Config control (21) | 16 | 21 | **21** | 21 | 12 |
+
+- **Learned beat static:** learned − static = +0.32 [0.16, 0.52], from a paired bootstrap over the 25 tasks.
+- **The top result changed only once trust had flipped.** In every model stream, learned trust's top result first differed from static's after **3** wrong verifier checks. Verifier trust had already started falling after the first.
+- **Per-topic trust protected the control topic.**
+  - With it, the verifier's config trust stayed above 0.95.
+  - Without it, the dependency failures dragged config trust down to 0.45, and config results fell from 21 to 12 of 21.
+- **Every learned miss was a learning cost:** 4 tasks per model, all before trust had flipped.
+- **Learned trust isn't clearly ahead of vector search** here: learned + evidence − vector search = +0.11 [−0.07, 0.27].
+
+**Central finding.** When one agent's reliability changes on one topic, per-topic learned trust adapts on that topic without damaging the agent's score on the other. Agent-level learning does damage it.
+
+**Read it narrowly:**
+- The shift was constructed to test this.
+- All three models behaved identically: every verifier was wrong on all 12 mirror tasks, and every lower agent shown the current file was right. The run therefore tests the mechanism on real agent output, not differences between models.
+- The 75-task intervals treat the model streams as independent and overstate the evidence. Only the paired bootstrap resamples tasks.
+
+Raw results: [results/benchmark_d/adaptive_trust_stress/](results/benchmark_d/adaptive_trust_stress/README.md). The authoritative evaluation is `eval-v2` ([report](results/benchmark_d/adaptive_trust_stress/runs/stress-v1/eval-v2/report.md)). `eval-v1` is kept but superseded: it counted two of gpt-6-luna's tasks twice, after two generate processes overlapped.
+
+### Benchmark D limitations
+
+- Small generated projects, scenarios written by the author, and 25 tasks per stream.
+- The claim-key list is supplied to the agents.
+- Harness checks are assumed correct.
+- Learned trust changes what is retrieved, not what agents do next.
+- One run per model; run-to-run variation was not measured.
+
 ## Setup
 
 Python 3.12 or 3.13.
@@ -208,6 +308,24 @@ python -m experiments.real_run all --provider fake --offline   # no API at all
 
 The tasks are in `experiments/real_run_tasks.yaml`. Add your own; each one is a context, the original fact, the correction, and the question.
 
+## Reproducing Benchmark D
+
+Rescoring the recorded runs needs no API key. Use a new `--eval-name`; existing evaluations are never overwritten.
+
+```bash
+python -m experiments.d_run evaluate --split pilot --run-id pilot-v2 --eval-name rescore
+python -m experiments.d_run evaluate --split stress --run-id stress-v1 --eval-name rescore
+(cd results/benchmark_d/runs/pilot-v2 && shasum -a 256 -c SHA256SUMS)
+```
+
+A new live run reads only `XAI_API_KEY` and `OPENAI_API_KEY` from the file named in `credentials_file` (`d_config.yaml`). It first prints a cost estimate (`python -m experiments.d_run estimate --split stress`), and stops at the configured budget cap:
+
+```bash
+python -m experiments.d_run generate --split stress --model gpt-6-luna --run-id my-run
+```
+
+Mock agents (`--mock --run-id mock-...`) exercise the whole pipeline offline.
+
 ## Other benchmarks
 
 There are also scripted, LLM-free scenarios and an ablation grid. Some of the ablations are meant to fail: each one removes a feature its scenario depends on, so a pass would mean the benchmark is broken.
@@ -219,7 +337,7 @@ There are also scripted, LLM-free scenarios and an ablation grid. Some of the ab
 | Compare against other memory designs (RAG, Mem0, BM25 hybrid, MemGPT- and A-MEM-style) | `python scripts/run_experiments.py techniques --seed 42` |
 | API server | `uvicorn api.main:app --reload` |
 
-`docs/BENCHMARKS.md` lists every benchmark and `docs/ABLATION_FAILURES.md` explains the failures that are supposed to happen.
+`docs/BENCHMARKS.md` lists the original benchmark tiers, `docs/BENCHMARK_C.md` and `docs/BENCHMARK_D.md` the later ones, and `docs/ABLATION_FAILURES.md` explains the failures that are supposed to happen.
 
 ## Layout
 

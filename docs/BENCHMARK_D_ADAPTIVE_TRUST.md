@@ -133,3 +133,61 @@ Offline rescoring:
 ```
 python -m experiments.d_run evaluate --split stress --run-id stress-v1 [--eval-name eval-vN]
 ```
+
+## Results (added after run `stress-v1`; the design above is unchanged)
+
+The authoritative evaluation is `runs/stress-v1/eval-v2`.
+
+| Item | Detail |
+|---|---|
+| Calls | 155 live calls (150 planned plus 5 duplicates), $0.27 |
+| Reply quality | 0 parse failures, 0 wrong claim keys, 0 replies cut off by the token limit |
+| Models | Every call came back from the model requested |
+| `eval-v1` | Kept but superseded: two gpt-6-luna tasks (005 and 006) were recorded twice by overlapping generate processes, and `eval-v2` drops the duplicate records when scoring |
+
+**Correct@1 by scenario, pooled over three models** (k/n):
+
+| Scenario | dense | static | learned | learned_evidence | learned_no_topic |
+|---|---|---|---|---|---|
+| Phase 1, healthy (18) | 18 | 18 | 18 | 18 | 18 |
+| p2 deps, mirror frozen (36) | 21 | 0 | 24 | 24 | 15 |
+| p2 config, control (21) | 16 | 21 | 21 | 21 | 12 |
+| All (75) | 55 | 39 | 63 | 63 | 45 |
+
+**Correct@3:** every trust variant 75/75, dense 73/75.
+
+**Paired bootstrap over tasks** (models resampled together), with 95% intervals:
+
+| Comparison | Difference | 95% CI |
+|---|---|---|
+| learned − static | +0.32 | [0.16, 0.52] |
+| learned − learned_no_topic | +0.24 | [0.08, 0.40] |
+| learned_evidence − learned | 0 | — |
+| learned_evidence − dense | +0.11 | [−0.07, 0.27] |
+
+**Transitions**, identical in all three model streams, given as the number of incorrect verifier checks on deps before each:
+
+| Transition | learned | learned_no_topic |
+|---|---|---|
+| Verifier trust below its prior | 1 | 1 |
+| Verifier trust below coder's | 3 | 5 |
+| Verifier trust below planner's | 5 | 7 |
+| Top-1 first differs from static | 3 | 7 |
+
+**Ranking changes.** The top result differed from static in 8 of 12 mirror-frozen tasks per model and in 0 of the 18 config tasks. With `learned_no_topic` it differed in 5 of 12 deps tasks and 3 of 7 config-control tasks.
+
+**Topic control.**
+- The verifier's minimum config trust in phase 2 was 0.952 with per-topic trust and 0.445 without it.
+- Its final deps trust was 0.38.
+
+**Agents.**
+- Every verifier on the frozen mirror was wrong: 12 of 12 for each model. None used the sync date.
+- Every lower agent shown the current file was right.
+- So the observed transitions equal the idealised expectations exactly.
+
+**Failures.** Learned trust missed 4 deps tasks per model (006, 007, 010, 013), all before its trust had swapped. Task 013 has the planner as the lower agent, which needs 5 incorrect checks before it overtakes the verifier.
+
+**Reading.**
+- Per-topic learned trust adapted to a reliability shift on one topic without hurting the other topic.
+- Agent-level learning did hurt the other topic.
+- This holds for a deliberately constructed shift, a single scenario that behaved identically across models, and 25 tasks. It does not show that learned trust beats static trust in general: in the pilot it did not.

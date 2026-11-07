@@ -207,3 +207,29 @@ Headline (`eval-v1`, pooled correct@1):
 When the lower-prior agent was right, every trust method failed (0/9) and dense got 6/9. Learned trust moved, but never changed the order of the roles. The conflict flag fired in none of the 52 tasks with conflicting claims. Agents recorded an expiry in only 4 to 6 of 85 writes per model.
 
 A separate secondary experiment on changing reliability lives under `results/benchmark_d/adaptive_trust_stress/`. Its results are never pooled with pilot-v2.
+
+### Settings that differ from the design text above
+
+These are what pilot-v2 and the stress run actually used. `d_config.yaml` is the source.
+- **Temperature:** `grok-4.7` ran at temperature 0. The two OpenAI models ran at their default of 1, because they reject 0 (HTTP 400).
+- **Credentials:** only `XAI_API_KEY` and `OPENAI_API_KEY` are read, from `credentials_file`, and only in memory. The `utils.config` environment loader isn't used. Replay never reads credentials.
+- **Prices:** verified by the user against the official pricing pages on 2026-11-07. Calls went to the global endpoints only.
+
+### Secondary experiment results (adaptive-trust stress, `eval-v2`)
+
+75 real-agent tasks (the same 25 frozen tasks for each model), 155 calls, $0.27. Pooled correct@1:
+
+| Method | Correct@1 |
+|---|---|
+| vector search | 55/75 |
+| static | 39/75 |
+| learned | 63/75 |
+| learned + evidence | 63/75 |
+| learned without per-topic trust (diagnostic) | 45/75 |
+
+- learned − static = +0.32, with a 95% interval of [0.16, 0.52] from a paired bootstrap over tasks.
+- In every model stream, the top result first changed after 3 wrong verifier checks.
+- Per-topic trust kept the verifier's config trust above 0.95. Without it, config trust fell to 0.45 and config correct@1 fell from 21/21 to 12/21.
+- All three models behaved identically, so this is one scenario run three times, not three replications.
+
+Full design and results: [BENCHMARK_D_ADAPTIVE_TRUST.md](BENCHMARK_D_ADAPTIVE_TRUST.md).
