@@ -1,0 +1,20 @@
+# Ablation experiment defaults (override via CLI or env MEMORY_*)
+# Real-model runs: set MEMORY_EXPERIMENT_CONFIG=experiment and MEMORY_USE_RERANKER=true
+experiments_runs_dir: "./experiments/runs"
+use_reranker: true
+
+# Optional sweep subset (runner uses all ABLATION_VARIANTS if omitted)
+# variants:
+#   - full
+#   - no_lineage_filter
+#   - no_trust_scoring
+
+# Five (variant × scenario) cells fail BY DESIGN each seed — see docs/ABLATION_FAILURES.md
+# and experiments/expected_failures.py. Do not treat as regressions.
+
+# scenarios run in ablation sweeps (subset of benchmark suite)
+ablation_scenarios:
+  - contradiction_resolution_v1
+  - long_horizon_v1
+  - collaborative_recall_v1
+  - trust_calibration_v1

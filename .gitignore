@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Project data (research artifacts)
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.index
+*.faiss
+*.ids.json
+
+# Experiment outputs (regenerated locally; keep directory placeholders)
+experiments/runs/*
+!experiments/runs/.gitkeep
+experiments/plots/*
+!experiments/plots/.gitkeep
+experiments/reports/*
+!experiments/reports/.gitkeep
+
+# Reference clones / third-party trees (local only)
+ref/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+*.pem
+
+# Logs
+logs/
+*.log
+
+# LaTeX build artifacts
+*.aux
+*.out
+*.synctex.gz
+*.toc
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+
+# Temp / scratch files
+zerogpt_check.md

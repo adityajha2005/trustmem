@@ -1,0 +1,209 @@
+# Real-run task set: each task is a mini project where a later, higher-trust
+# agent corrects a fact an earlier agent recorded. LLM agents write the memories
+# in their own words; retrieval is then scored on whether the correction wins.
+#
+#   context    : shared project background every agent sees
+#   original   : what the planner believes (and the coder builds on) - stale
+#   correction : what the verifier confirmed with the source of truth
+#   query      : what a later agent asks the shared memory
+tasks:
+  - id: deploy_window
+    context: A team is shipping v2 of a billing service.
+    original: Production deploys happen Fridays at 14:00 UTC.
+    correction: The release manager moved production deploys to Wednesdays at 09:00 UTC.
+    query: When do production deploys happen?
+  - id: auth_method
+    context: A mobile app backend is adding login for a partner integration.
+    original: Partner clients authenticate with long-lived JWTs signed by our service.
+    correction: Security review rejected JWTs; partners must use OAuth 2.0 client credentials.
+    query: How do partner clients authenticate?
+  - id: api_rate_limit
+    context: A public REST API is preparing for a launch.
+    original: The public API rate limit is 1000 requests per minute per key.
+    correction: Infra lowered the public API limit to 300 requests per minute per key.
+    query: What is the public API rate limit per key?
+  - id: db_choice
+    context: A startup is building an analytics dashboard.
+    original: Event data will be stored in MongoDB.
+    correction: The CTO decided event data goes into ClickHouse instead of MongoDB.
+    query: Which database stores the event data?
+  - id: python_version
+    context: A data team is containerising its ETL jobs.
+    original: All ETL containers use Python 3.10.
+    correction: The platform team mandated Python 3.12 for all ETL containers.
+    query: Which Python version do the ETL containers use?
+  - id: endpoint_rename
+    context: A team is versioning its user API.
+    original: User profiles are served from GET /api/v1/users/{id}.
+    correction: The endpoint was renamed to GET /api/v2/accounts/{id}; v1 is removed.
+    query: Which endpoint serves user profiles?
+  - id: region
+    context: A SaaS company is launching in Europe.
+    original: The EU deployment runs in AWS eu-west-1 (Ireland).
+    correction: Legal required Frankfurt; the EU deployment runs in AWS eu-central-1.
+    query: Which AWS region hosts the EU deployment?
+  - id: retention
+    context: A logging pipeline is being configured for compliance.
+    original: Application logs are retained for 90 days.
+    correction: Compliance requires application logs be retained for 365 days.
+    query: How long are application logs retained?
+  - id: payment_provider
+    context: An e-commerce app is integrating checkout.
+    original: Checkout payments are processed through PayPal.
+    correction: The business switched checkout to Stripe; PayPal is not used.
+    query: Which provider processes checkout payments?
+  - id: model_choice
+    context: A support chatbot is being built.
+    original: The chatbot uses a fine-tuned 7B open-weights model hosted in-house.
+    correction: Cost review moved the chatbot to a hosted API model; no self-hosted model.
+    query: What model setup does the support chatbot use?
+  - id: on_call
+    context: A platform team is setting up incident response.
+    original: Priya is the primary on-call engineer this week.
+    correction: The rota changed; Marco is the primary on-call engineer this week.
+    query: Who is the primary on-call engineer this week?
+  - id: feature_flag
+    context: A team is rolling out a new search ranking.
+    original: New ranking is enabled for 50% of users via the search_v2 flag.
+    correction: Rollout was cut back to 5% of users after a latency regression.
+    query: What percentage of users have the new search ranking?
+  - id: cache_ttl
+    context: A product catalogue service is adding caching.
+    original: Product pages are cached in Redis with a 1 hour TTL.
+    correction: Pricing errors forced the product page cache TTL down to 5 minutes.
+    query: What is the cache TTL for product pages?
+  - id: queue_tech
+    context: An order processing system needs async jobs.
+    original: Background jobs run on RabbitMQ.
+    correction: The team migrated background jobs to AWS SQS and decommissioned RabbitMQ.
+    query: What queue do background jobs run on?
+  - id: launch_date
+    context: A consumer app is preparing its public launch.
+    original: Public launch is set for March 3.
+    correction: Launch slipped to March 17 because of app store review.
+    query: When is the public launch?
+  - id: max_upload
+    context: A file sharing feature is being built.
+    original: Users can upload files up to 100 MB.
+    correction: The upload limit was raised to 2 GB with multipart uploads.
+    query: What is the maximum file upload size?
+  - id: frontend_framework
+    context: A team is rewriting an internal admin panel.
+    original: The admin panel rewrite uses Vue 3.
+    correction: Leadership standardised on React; the admin panel rewrite uses React.
+    query: Which framework does the admin panel rewrite use?
+  - id: timeout
+    context: A service calls a slow third-party geocoding API.
+    original: Geocoding requests time out after 30 seconds.
+    correction: SRE set the geocoding timeout to 5 seconds with 2 retries.
+    query: What is the timeout for geocoding requests?
+  - id: password_policy
+    context: An identity service is updating account security.
+    original: Passwords must be at least 8 characters.
+    correction: The security team raised the minimum password length to 12 characters.
+    query: What is the minimum password length?
+  - id: owner_team
+    context: A company is assigning service ownership.
+    original: The notifications service is owned by the Growth team.
+    correction: Ownership of the notifications service moved to the Platform team.
+    query: Which team owns the notifications service?
+  - id: pricing
+    context: A developer tool is finalising its pricing page.
+    original: The Pro plan costs $20 per month.
+    correction: Finance set the Pro plan at $29 per month.
+    query: How much does the Pro plan cost?
+  - id: backup_schedule
+    context: A database team is configuring backups.
+    original: Full database backups run weekly on Sundays.
+    correction: Backups were changed to run nightly at 02:00 UTC.
+    query: How often do full database backups run?
+  - id: ci_provider
+    context: A team is moving its build pipelines.
+    original: CI runs on Jenkins.
+    correction: CI was migrated to GitHub Actions; Jenkins is shut down.
+    query: Where does CI run?
+  - id: embedding_model
+    context: A RAG search feature is being built over company docs.
+    original: Documents are embedded with all-MiniLM-L6-v2.
+    correction: Evaluation picked bge-base-en-v1.5 as the embedding model.
+    query: Which embedding model is used for documents?
+  - id: sla
+    context: An enterprise contract is being drafted.
+    original: The enterprise SLA guarantees 99.9% uptime.
+    correction: Sales agreed to a 99.95% uptime SLA for enterprise customers.
+    query: What uptime does the enterprise SLA guarantee?
+  - id: meeting_time
+    context: A distributed team is setting up rituals.
+    original: Sprint planning is Mondays at 10:00 CET.
+    correction: Sprint planning moved to Tuesdays at 15:00 CET to fit the US team.
+    query: When is sprint planning?
+  - id: currency
+    context: A marketplace is adding international sellers.
+    original: Seller payouts are made in USD only.
+    correction: Seller payouts are now made in the seller's local currency.
+    query: In what currency are seller payouts made?
+  - id: tls_version
+    context: A security hardening project is underway.
+    original: The load balancer accepts TLS 1.2 and above.
+    correction: The load balancer was restricted to TLS 1.3 only.
+    query: Which TLS versions does the load balancer accept?
+  - id: batch_size
+    context: An ML team is training a recommendation model.
+    original: Training uses a batch size of 256.
+    correction: Batch size was reduced to 64 after out-of-memory errors.
+    query: What batch size does training use?
+  - id: support_hours
+    context: A customer success team is publishing support policies.
+    original: Support is available 9am to 5pm EST on weekdays.
+    correction: Support is now available 24/7 for paying customers.
+    query: When is customer support available?
+  - id: k8s_version
+    context: An infra team is planning a cluster upgrade.
+    original: The production cluster runs Kubernetes 1.27.
+    correction: The cluster was upgraded and now runs Kubernetes 1.30.
+    query: Which Kubernetes version does the production cluster run?
+  - id: email_provider
+    context: A SaaS app sends transactional emails.
+    original: Transactional emails are sent via SendGrid.
+    correction: Deliverability issues moved transactional email to Postmark.
+    query: Which service sends transactional emails?
+  - id: refund_window
+    context: An online store is writing its refund policy.
+    original: Customers can request refunds within 14 days.
+    correction: The refund window was extended to 30 days.
+    query: How long do customers have to request a refund?
+  - id: storage_bucket
+    context: A media pipeline stores processed videos.
+    original: Processed videos go to the s3://media-prod bucket.
+    correction: Processed videos now go to s3://media-prod-v2; the old bucket is read-only.
+    query: Which bucket stores processed videos?
+  - id: lint_rule
+    context: A Python monorepo is standardising tooling.
+    original: Code is formatted with Black and linted with Flake8.
+    correction: The repo switched to Ruff for both formatting and linting.
+    query: Which tools format and lint the code?
+  - id: sample_rate
+    context: An observability team is tuning tracing.
+    original: Traces are sampled at 10%.
+    correction: Trace sampling was lowered to 1% to control cost.
+    query: What is the trace sampling rate?
+  - id: mobile_min_os
+    context: A mobile team is planning its next release.
+    original: The iOS app supports iOS 15 and later.
+    correction: The minimum supported version was raised to iOS 17.
+    query: What is the minimum supported iOS version?
+  - id: vendor_contact
+    context: A team integrates with an external logistics vendor.
+    original: Integration issues go to the vendor contact at ops@shipfast.example.
+    correction: The vendor asked that integration issues go to api-support@shipfast.example.
+    query: Where should vendor integration issues be sent?
+  - id: data_residency
+    context: A health-tech startup is handling patient data.
+    original: Patient data may be processed in any US region.
+    correction: Patient data must stay in us-east-1 only, per the BAA.
+    query: Where may patient data be processed?
+  - id: release_branch
+    context: A team is defining its git workflow.
+    original: Releases are cut from the develop branch.
+    correction: Releases are now cut from main using trunk-based development.
+    query: Which branch are releases cut from?
